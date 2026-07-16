@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import pandas as pd
@@ -288,6 +288,20 @@ class MT5Engine:
         positions = mt5.positions_get() or []
         return [p for p in positions if p.magic == magic]
 
+    def broker_offset_seconds(self, symbol: str) -> int:
+        """Broker-server clock minus true UTC, measured via a live tick.
+        MT5 position/deal timestamps (`p.time`, `deal.time`) are in the
+        broker's clock, not true UTC (historically several hours off) — any
+        caller treating one of those as UTC directly needs this correction
+        first, or ends up writing a timestamp that's hours late into the
+        ledger (which is exactly what happened before this existed: a
+        reconciled position's opened_ts landed *after* its own closed_ts)."""
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None or not tick.time:
+            return 0
+        broker_now = datetime.fromtimestamp(tick.time, tz=timezone.utc)
+        return int((broker_now - datetime.now(timezone.utc)).total_seconds())
+
     def _filling_candidates(self, broker_sym: str) -> list[int]:
         """Order-type_filling candidates to try for this symbol, best guess first.
 
@@ -430,9 +444,10 @@ class MT5Engine:
             mt5.DEAL_REASON_SL: "sl",
             mt5.DEAL_REASON_TP: "tp",
         }
+        offset = self.broker_offset_seconds(exit_deal.symbol)
         return {
             "exit_price": exit_deal.price,
             "pnl_usd": sum(d.profit + d.commission + d.swap for d in deals),
             "exit_reason": reason_map.get(exit_deal.reason, "manual"),
-            "closed_ts": datetime.fromtimestamp(exit_deal.time, tz=timezone.utc),
+            "closed_ts": datetime.fromtimestamp(exit_deal.time, tz=timezone.utc) - timedelta(seconds=offset),
         }

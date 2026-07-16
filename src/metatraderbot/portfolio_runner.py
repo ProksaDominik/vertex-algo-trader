@@ -15,7 +15,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Type
 
@@ -426,10 +426,17 @@ class PortfolioRunner:
         # them from their current SL so the trailing-stop logic still applies.
         for ticket, p in live.items():
             if ticket not in slot.tracked:
+                # p.time is MT5's own (broker-clock) timestamp, not true UTC —
+                # treating it as UTC directly used to write an opened_ts that
+                # could land HOURS after the position's own (correctly true-
+                # UTC) closed_ts once it later closed, showing as a negative/
+                # "0m" duration and a reversed entry/exit order in the replay.
+                offset = self.engine.broker_offset_seconds(p.symbol)
+                opened_ts = datetime.fromtimestamp(p.time, tz=timezone.utc) - timedelta(seconds=offset)
                 slot.tracked[ticket] = TrackedPosition(
                     entry=p.price_open, orig_sl=p.sl, orig_tp=p.tp, lots=p.volume,
                     is_long=(p.type == 0),
-                    opened_ts=datetime.fromtimestamp(p.time, tz=timezone.utc).isoformat(timespec="microseconds"),
+                    opened_ts=opened_ts.isoformat(timespec="microseconds"),
                 )
 
         # Ratchet trailing stop: once profit reaches trail_start_r x the

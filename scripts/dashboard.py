@@ -504,6 +504,13 @@ def build_closed_trade_chart_html(
     priceFormat: priceFormat,
   }});
   window.addEventListener("resize", () => chart.applyOptions({{ width: container.clientWidth }}));
+  // A ResizeObserver too, not just the window "resize" event: this chart
+  // renders inside an st.dialog modal, whose final on-screen size can settle
+  // a moment after this script runs (CSS/layout catching up to the dialog
+  // opening) — without this, the chart can get stuck at whatever narrow
+  // width it happened to measure first, which looks "zoomed in" no matter
+  // how much time-range padding is added.
+  new ResizeObserver(() => chart.applyOptions({{ width: container.clientWidth }})).observe(container);
 
   function snapToBar(bars, targetTime) {{
     const onOrBefore = bars.filter(b => b.time <= targetTime);
@@ -591,11 +598,14 @@ def build_closed_trade_chart_html(
       entryBarTime = snapToBar(allBars, {opened_broker_ts});
       exitBarTime = snapToBar(allBars, {closed_broker_ts});
 
-      // Reveal in real time where possible, but cap total animation length
-      // so a multi-hour trade doesn't take minutes to play out.
-      const targetTotalMs = 9000, minFrameMs = 15, maxFrameMs = 120;
-      frameMs = Math.min(maxFrameMs, Math.max(minFrameMs, targetTotalMs / allBars.length));
-      barsPerTick = frameMs === minFrameMs ? Math.max(1, Math.ceil((allBars.length * minFrameMs) / targetTotalMs)) : 1;
+      // Fixed reveal speed (ms per bar) so a longer trade plays a longer
+      // animation and a short one plays a short one, instead of always
+      // squeezing every trade into the same ~9s regardless of how long it
+      // actually took. barsPerTick only kicks in past maxTotalMs, as a
+      // safety valve for the rare very-long trade rather than the norm.
+      const perBarMs = 45, maxTotalMs = 45000;
+      frameMs = perBarMs;
+      barsPerTick = Math.max(1, Math.ceil((allBars.length * perBarMs) / maxTotalMs));
 
       idx = Math.min(1, allBars.length);
       render();
@@ -1023,11 +1033,11 @@ def render_closed_positions() -> None:
                     opened_broker_ts = int(opened_dt.timestamp()) + offset
                     closed_broker_ts = int(closed_dt.timestamp()) + offset
                     duration_s = max(closed_broker_ts - opened_broker_ts, 60)
-                    # Pad by as much as the trade itself lasted on each side
-                    # (min 30 min, max 3h) so the replay shows real market
-                    # context before/after the trade instead of a tight crop
-                    # that looks zoomed in on just the entry-to-exit move.
-                    padding_s = int(min(max(duration_s * 1.0, 30 * 60), 3 * 3600))
+                    # Pad by 1.5x the trade's own duration on each side (min
+                    # 45 min, max 4h) — wide enough to actually read the
+                    # market structure around the trade instead of a tight
+                    # crop around just the entry-to-exit move.
+                    padding_s = int(min(max(duration_s * 1.5, 45 * 60), 4 * 3600))
                     st.session_state["review_trade"] = {
                         "symbol": row["symbol"], "is_long": is_long,
                         "entry": float(row["entry_price"]), "sl": float(row["sl"]), "tp": float(row["tp"]),
