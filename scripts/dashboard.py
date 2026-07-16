@@ -615,16 +615,13 @@ def build_closed_trade_chart_html(
 
       // Fixed viewport for the whole animation — computed from the full
       // fetched range up front so the chart doesn't rescale/jump as more
-      // candles get revealed each tick. Deliberately NOT including sl/tp
-      // here: Donchian-style stops can sit far outside where price actually
-      // traded (the ratchet trailing stop usually closes the trade well
-      // before the original, wide SL is ever approached), and forcing the
-      // axis to stretch all the way out to a stop that was never touched
-      // squashed the real candle detail into an unreadable sliver. SL/TP
-      // still get drawn as price lines below — they'll just sit off-screen
-      // if they're that far away, same as a real trading platform would show.
-      let lo = Math.min({entry}, {exit_price});
-      let hi = Math.max({entry}, {exit_price});
+      // candles get revealed each tick. Includes sl/tp directly: the window
+      // itself is now just the trade (a couple minutes either side, not
+      // hours of context), so even a wide Donchian-style stop is a modest
+      // multiple of that tight range, not the 10-70x blowout it would've
+      // been back when this was combined with a large context window too.
+      let lo = Math.min({entry}, {exit_price}, {sl}, {tp});
+      let hi = Math.max({entry}, {exit_price}, {sl}, {tp});
       for (const b of allBars) {{ lo = Math.min(lo, b.low); hi = Math.max(hi, b.high); }}
       const span = hi - lo;
       lo -= span * 0.08;
