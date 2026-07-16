@@ -410,7 +410,7 @@ def _broker_offset_seconds(symbol: str) -> int:
     true-UTC opened/closed timestamps into the range copy_rates_range expects.
 
     Called exactly once per review (when the button is clicked, see
-    render_history), NOT on every render — baking a freshly-measured value
+    render_closed_positions), NOT on every render — baking a freshly-measured value
     into the chart HTML on every fragment rerun would make the HTML differ
     by a second or two each cycle (tick.time jitter), which defeats Streamlit's
     identical-content check and remounts the iframe — restarting the
@@ -434,7 +434,7 @@ def build_closed_trade_chart_html(
     entry/exit are drawn as persistent horizontal lines for the whole
     animation — the entry/exit arrow markers additionally pop in the instant
     the reveal reaches that bar. All timestamps are precomputed once by the
-    caller (see render_history) so this function is a pure formatter with no
+    caller (see render_closed_positions) so this function is a pure formatter with no
     MT5 calls and byte-identical output across Streamlit fragment reruns —
     required so the auto-refresh timer doesn't remount the iframe mid-animation."""
     marker_shape = "arrowUp" if is_long else "arrowDown"
@@ -935,21 +935,17 @@ def render_summary() -> None:
 
 
 @st.fragment(run_every=refresh_s)
-def render_history() -> None:
-    """Closed positions, equity curve, per-strategy stats, and the raw
-    signal/order/closed tables — everything that isn't 'what's open right
-    now'. Rendered after the open-positions section (per explicit ordering
-    request) as its own fragment, independently fetching the same ledger +
-    live-position data render_live() and render_open_positions() already
-    fetch — a small duplicate read, same pattern already used elsewhere in
-    this file, and it keeps each section's own refresh timer independent."""
-    signals, orders, closed, _heartbeats = load_ledger(ledger_path)
-    slot_names = load_slot_names(bot_choice)
-    live_open = get_live_open_positions(slot_names)
-    floating_pnl = float(live_open["Floating P&L"].sum()) if live_open is not None and len(live_open) else 0.0
+def render_closed_positions() -> None:
+    """Closed positions card only — split out from the rest of what used to
+    be render_history (equity curve, per-strategy stats, raw tables) so that
+    render_trade_review() (called right after this one, see the bottom of the
+    file) renders its replay animation directly below the table it was
+    opened from, instead of scrolled past all that other content too.
+    Independently fetching the ledger — a small duplicate read, same pattern
+    already used elsewhere in this file — keeps this section's own refresh
+    timer independent of the others."""
+    _signals, _orders, closed, _heartbeats = load_ledger(ledger_path)
     realized_pnl = float(closed["pnl_usd"].sum()) if len(closed) else 0.0
-    total_pnl = realized_pnl + floating_pnl
-    target_equity = target_size + total_pnl
 
     with st.container(border=True):
         # --- Closed positions, one clear card per trade — realized_pnl above is
@@ -1028,6 +1024,23 @@ def render_history() -> None:
                     # called from inside a fragment) is needed here once, to
                     # make that other fragment notice the new selection.
                     st.rerun()
+
+
+@st.fragment(run_every=refresh_s)
+def render_equity_and_stats() -> None:
+    """Equity curve, per-strategy stats, and the raw signal/order/closed
+    tables — everything else that used to live in render_history (see
+    render_closed_positions above for why it was split out). Independently
+    fetching the ledger + live-position data render_closed_positions and
+    render_open_positions already fetch — a small duplicate read, same
+    pattern already used elsewhere in this file."""
+    signals, orders, closed, _heartbeats = load_ledger(ledger_path)
+    slot_names = load_slot_names(bot_choice)
+    live_open = get_live_open_positions(slot_names)
+    floating_pnl = float(live_open["Floating P&L"].sum()) if live_open is not None and len(live_open) else 0.0
+    realized_pnl = float(closed["pnl_usd"].sum()) if len(closed) else 0.0
+    total_pnl = realized_pnl + floating_pnl
+    target_equity = target_size + total_pnl
 
     with st.container(border=True):
         # --- Live equity curve, ALWAYS normalized to target account size ---
@@ -1223,11 +1236,13 @@ def render_trade_review() -> None:
     fragment with NO run_every timer (same reasoning as render_open_positions
     above): the animation is a self-contained JS component that plays out
     once and then sits still, so it must NOT be torn down and remounted every
-    refresh_s tick the way it would be if it lived inside render_history's
-    auto-refreshing fragment. The "📈" button that populates
-    st.session_state["review_trade"] lives over in render_history and calls
-    st.rerun() (full-app scope) once after setting it, which is what makes
-    this fragment notice the new selection and render for the first time."""
+    refresh_s tick the way it would be if it lived inside an auto-refreshing
+    fragment. Called right after render_closed_positions (see the bottom of
+    the file) so it renders directly below the table it was opened from. The
+    "📈" button that populates st.session_state["review_trade"] lives over in
+    render_closed_positions and calls st.rerun() (full-app scope) once after
+    setting it, which is what makes this fragment notice the new selection
+    and render for the first time."""
     review = st.session_state.get("review_trade")
     if not review:
         return
@@ -1247,5 +1262,6 @@ def render_trade_review() -> None:
 
 render_summary()
 render_open_positions()
-render_history()
+render_closed_positions()
 render_trade_review()
+render_equity_and_stats()
