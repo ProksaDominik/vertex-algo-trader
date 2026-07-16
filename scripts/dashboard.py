@@ -403,6 +403,152 @@ def build_live_chart_html(symbol: str, ticket: int, is_long: bool, default_timef
 """
 
 
+def _broker_offset_seconds(symbol: str) -> int:
+    """Broker-server clock minus true UTC, measured via a live tick (see the
+    'Opened' timestamp fix earlier — MT5's own timestamps are in the broker's
+    clock, not true UTC, commonly hours off). Needed to convert the ledger's
+    true-UTC opened/closed timestamps into the range copy_rates_range expects."""
+    if not _MT5_AVAILABLE or not mt5.initialize():
+        return 0
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None or not tick.time:
+        return 0
+    broker_now = datetime.fromtimestamp(tick.time, tz=timezone.utc)
+    return int((broker_now - datetime.now(timezone.utc)).total_seconds())
+
+
+def build_closed_trade_chart_html(
+    symbol: str, is_long: bool, entry: float, sl: float, tp: float, exit_price: float,
+    pnl: float, exit_reason: str, opened_ts: datetime, closed_ts: datetime,
+    default_timeframe: str = "15m", height: int = 420,
+) -> str:
+    """Static replay chart for a CLOSED trade: candles from before entry to
+    after exit, with entry/exit markers plus SL/TP lines, so you can see
+    exactly how price moved through the life of the trade. No live polling
+    needed (the trade's already over) — one fetch on load / timeframe switch."""
+    marker_shape = "arrowUp" if is_long else "arrowDown"
+    win = pnl > 0
+    exit_color = _UP if win else _DOWN
+    div_id = f"lwc_{int(opened_ts.timestamp())}_{symbol}"
+    precision, min_move = _price_precision(symbol)
+
+    offset = _broker_offset_seconds(symbol)
+    opened_broker_ts = int(opened_ts.timestamp()) + offset
+    closed_broker_ts = int(closed_ts.timestamp()) + offset
+    duration_s = max(closed_broker_ts - opened_broker_ts, 60)
+    padding_s = int(min(max(duration_s * 0.6, 2 * 3600), 24 * 3600))
+    ts_from = opened_broker_ts - padding_s
+    ts_to = closed_broker_ts + padding_s
+
+    reason_label = {"tp": "hit take-profit", "sl": "hit stop-loss (or trailing stop)", "manual": "closed manually"}.get(exit_reason, exit_reason)
+
+    return f"""
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+  #chart_wrap_{div_id} * {{ font-family: 'Inter', sans-serif; }}
+</style>
+<div id="chart_wrap_{div_id}" style="background:{_BG}; padding:8px; border-radius:10px; border:1px solid rgba(255,255,255,0.06);">
+  <div style="margin-bottom:8px; display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+    <div style="font-size:1.4rem; font-weight:700; color:{exit_color};">
+      {'+' if win else ''}{pnl:.2f} USD
+    </div>
+    <div style="color:{_AXIS_LABEL}; font-size:0.85rem; opacity:0.85;">
+      {symbol} {'long' if is_long else 'short'} &nbsp; Entry {entry:.{precision}f} → Exit {exit_price:.{precision}f} &nbsp; ({reason_label})
+    </div>
+  </div>
+  <div style="margin-bottom:6px;">
+    <button onclick="window.__switchTf_{div_id}('15m')" style="background:rgba(255,255,255,0.04);color:{_AXIS_LABEL};border:1px solid rgba(255,255,255,0.1);padding:4px 10px;border-radius:6px;cursor:pointer;margin-right:6px;">15m</button>
+    <button onclick="window.__switchTf_{div_id}('1m')" style="background:rgba(255,255,255,0.04);color:{_AXIS_LABEL};border:1px solid rgba(255,255,255,0.1);padding:4px 10px;border-radius:6px;cursor:pointer;">1m</button>
+    <span id="tf_label_{div_id}" style="color:{_AXIS_LABEL};margin-left:10px;">{default_timeframe}</span>
+  </div>
+  <div id="{div_id}" style="width:100%; height:{height}px;"></div>
+</div>
+<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+(function() {{
+  const container = document.getElementById("{div_id}");
+  const chart = LightweightCharts.createChart(container, {{
+    width: container.clientWidth, height: {height},
+    layout: {{ background: {{ color: "{_BG}" }}, textColor: "{_AXIS_LABEL}", fontFamily: "Inter, sans-serif" }},
+    grid: {{ vertLines: {{ color: "{_GRID}" }}, horzLines: {{ color: "{_GRID}" }} }},
+    rightPriceScale: {{ borderColor: "{_GRID}", visible: true, scaleMargins: {{ top: 0.1, bottom: 0.1 }} }},
+    timeScale: {{
+      borderColor: "{_GRID}", timeVisible: true, secondsVisible: false,
+      tickMarkFormatter: (time) => {{
+        const d = new Date(time * 1000);
+        const hh = String(d.getUTCHours()).padStart(2, '0');
+        const mm = String(d.getUTCMinutes()).padStart(2, '0');
+        const dd = String(d.getUTCDate()).padStart(2, '0');
+        const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+        return mo + "-" + dd + " " + hh + ":" + mm;
+      }},
+    }},
+    crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }},
+  }});
+  const priceFormat = {{ type: "price", precision: {precision}, minMove: {min_move} }};
+  const series = chart.addCandlestickSeries({{
+    upColor: "{_UP}", downColor: "{_DOWN}", borderVisible: false,
+    wickUpColor: "{_UP}", wickDownColor: "{_DOWN}",
+    priceFormat: priceFormat,
+  }});
+  const rangeSeries = chart.addLineSeries({{
+    color: "rgba(0,0,0,0)", lineWidth: 1,
+    priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+    priceFormat: priceFormat,
+  }});
+  window.addEventListener("resize", () => chart.applyOptions({{ width: container.clientWidth }}));
+
+  let tf = "{default_timeframe}";
+
+  function snapToBar(bars, targetTime) {{
+    const onOrBefore = bars.filter(b => b.time <= targetTime);
+    return onOrBefore.length ? onOrBefore[onOrBefore.length - 1].time : bars[0].time;
+  }}
+
+  async function load(newTf) {{
+    tf = newTf || tf;
+    // Re-derive the padded range for the new timeframe (tighter timeframe ->
+    // proportionally tighter padding so it doesn't look absurdly zoomed out).
+    const tfSeconds = {{'1m': 60, '15m': 900}}[tf] || 900;
+    const duration = {closed_broker_ts} - {opened_broker_ts};
+    const padding = Math.min(Math.max(duration * 0.6, 2 * 3600), 24 * 3600);
+    const from = {opened_broker_ts} - padding;
+    const to = {closed_broker_ts} + padding;
+    try {{
+      const res = await fetch(`{CHART_API_URL}/history?symbol={symbol}&timeframe=${{tf}}&from=${{from}}&to=${{to}}`);
+      const data = await res.json();
+      if (!data.bars || !data.bars.length) return;
+      series.setData(data.bars);
+      chart.timeScale().fitContent();
+
+      const lo = Math.min({sl}, {tp}, {entry});
+      const hi = Math.max({sl}, {tp}, {entry});
+      const firstT = data.bars[0].time, lastT = data.bars[data.bars.length - 1].time;
+      rangeSeries.setData([{{time: firstT, value: lo}}, {{time: lastT, value: hi}}]);
+
+      series.createPriceLine({{price: {sl}, color: "{_SL_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "SL"}});
+      series.createPriceLine({{price: {tp}, color: "{_TP_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "TP"}});
+
+      const entryBarTime = snapToBar(data.bars, {opened_broker_ts});
+      const exitBarTime = snapToBar(data.bars, {closed_broker_ts});
+      series.setMarkers([
+        {{time: entryBarTime, position: {'"belowBar"' if is_long else '"aboveBar"'}, color: "{_ENTRY_COLOR}", shape: "{marker_shape}", text: "Entry " + ({entry}).toFixed({precision})}},
+        {{time: exitBarTime, position: {'"aboveBar"' if is_long else '"belowBar"'}, color: "{exit_color}", shape: {'"arrowDown"' if is_long else '"arrowUp"'}, text: "Exit " + ({exit_price}).toFixed({precision})}},
+      ]);
+    }} catch (e) {{ /* transient fetch error — chart_api.py may not be running */ }}
+  }}
+
+  window.__switchTf_{div_id} = function(newTf) {{
+    document.getElementById("tf_label_{div_id}").innerText = newTf;
+    load(newTf);
+  }};
+
+  load();
+}})();
+</script>
+"""
+
+
 def close_ticket(ticket: int) -> tuple[bool, str]:
     """Manually close an open position from the dashboard. Reuses MT5Engine's
     filling-mode-aware close logic — see mt5_engine.py's _filling_candidates
@@ -762,12 +908,13 @@ def render_history() -> None:
                 unsafe_allow_html=True,
             )
             strat_by_name = load_strategy_by_config_name(bot_choice)
-            hdr = st.columns([1.8, 0.7, 0.4, 1.4, 0.9, 1.2, 1.2, 0.9])
-            for col, label in zip(hdr, ["Strategy", "Symbol", "Dir", "Entry → Exit", "P&L", "Opened (SK)", "Closed (SK)", "Duration"]):
+            col_widths = [1.6, 0.7, 0.4, 1.3, 0.9, 1.1, 1.1, 0.8, 0.6]
+            hdr = st.columns(col_widths)
+            for col, label in zip(hdr, ["Strategy", "Symbol", "Dir", "Entry → Exit", "P&L", "Opened (SK)", "Closed (SK)", "Duration", ""]):
                 col.markdown(f"**{label}**")
 
             for _, row in closed.sort_values("closed_ts", ascending=False).iterrows():
-                cols = st.columns([1.8, 0.7, 0.4, 1.4, 0.9, 1.2, 1.2, 0.9])
+                cols = st.columns(col_widths)
                 cols[0].markdown(
                     strategy_cell_html(strat_by_name.get(row["config_name"], ""), row["config_name"], show_explain=False),
                     unsafe_allow_html=True,
@@ -792,6 +939,27 @@ def render_history() -> None:
                 cols[5].write(opened_sk.strftime("%Y-%m-%d %H:%M:%S"))
                 cols[6].write(closed_sk.strftime("%Y-%m-%d %H:%M:%S"))
                 cols[7].write(_fmt_duration(closed_dt - opened_dt))
+                if cols[8].button("📈", key=f"review_{row['ticket']}", help="See how this trade played out"):
+                    st.session_state["review_trade"] = {
+                        "symbol": row["symbol"], "is_long": is_long,
+                        "entry": float(row["entry_price"]), "sl": float(row["sl"]), "tp": float(row["tp"]),
+                        "exit_price": float(row["exit_price"]), "pnl": float(pnl), "exit_reason": row["exit_reason"],
+                        "opened_ts": opened_dt.to_pydatetime(), "closed_ts": closed_dt.to_pydatetime(),
+                    }
+
+            review = st.session_state.get("review_trade")
+            if review:
+                st.divider()
+                close_col, _ = st.columns([0.15, 0.85])
+                if close_col.button("✕ Close replay"):
+                    st.session_state["review_trade"] = None
+                    st.rerun()
+                html = build_closed_trade_chart_html(
+                    review["symbol"], review["is_long"], review["entry"], review["sl"], review["tp"],
+                    review["exit_price"], review["pnl"], review["exit_reason"],
+                    review["opened_ts"], review["closed_ts"],
+                )
+                components.html(html, height=540, scrolling=False)
 
     with st.container(border=True):
         # --- Live equity curve, ALWAYS normalized to target account size ---

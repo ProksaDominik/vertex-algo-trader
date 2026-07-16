@@ -42,6 +42,25 @@ def get_bars(symbol: str, timeframe: str, count: int) -> list[dict]:
     ]
 
 
+def get_bars_range(symbol: str, timeframe: str, ts_from: int, ts_to: int) -> list[dict]:
+    """Bars within an explicit past time range — for reviewing a CLOSED trade.
+    copy_rates_from_pos only ever gets the *most recent* N bars (position 0 =
+    now), which is useless for a trade that closed hours/days ago; this uses
+    copy_rates_range instead, which MT5 will happily serve from history."""
+    tf_attr = TIMEFRAME_MAP.get(timeframe)
+    if tf_attr is None:
+        return []
+    tf = getattr(mt5, tf_attr)
+    rates = mt5.copy_rates_range(symbol, tf, ts_from, ts_to)
+    if rates is None:
+        return []
+    return [
+        {"time": int(r["time"]), "open": float(r["open"]), "high": float(r["high"]),
+         "low": float(r["low"]), "close": float(r["close"])}
+        for r in rates
+    ]
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # keep the console quiet — this gets hit every ~1s per open chart
@@ -57,11 +76,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+
+        if parsed.path == "/history":
+            self._handle_history(qs)
+            return
         if parsed.path != "/chart":
             self._send_json({"error": "not found"}, 404)
             return
 
-        qs = parse_qs(parsed.query)
         symbol = qs.get("symbol", [""])[0]
         timeframe = qs.get("timeframe", ["1m"])[0]
         ticket = qs.get("ticket", [""])[0]
@@ -95,6 +118,21 @@ class Handler(BaseHTTPRequestHandler):
                 }
 
         self._send_json({"bars": bars, "position": position})
+
+    def _handle_history(self, qs: dict) -> None:
+        """Bars for a CLOSED trade replay: an explicit [from, to] time range
+        (padded before/after by the caller) instead of "the last N bars"."""
+        symbol = qs.get("symbol", [""])[0]
+        timeframe = qs.get("timeframe", ["15m"])[0]
+        ts_from = int(qs.get("from", ["0"])[0])
+        ts_to = int(qs.get("to", ["0"])[0])
+
+        if not mt5.initialize():
+            self._send_json({"error": f"MT5 not reachable: {mt5.last_error()}"}, 503)
+            return
+
+        bars = get_bars_range(symbol, timeframe, ts_from, ts_to)
+        self._send_json({"bars": bars})
 
 
 def main() -> int:
