@@ -1,0 +1,110 @@
+# FTMO $10k Challenge portfolio — picked from the 360-config sweep at $100 risk.
+# Every config passes FTMO's -$1,000 max-loss limit individually.
+# Kill switches in portfolio_runner.py hard-stop the bot before any FTMO rule breaches.
+
+capital:
+  # $100/trade = 1% of $10k. Well within FTMO's individual position rules.
+  risk_usd_per_trade: 100
+
+  # FTMO safety buffers (their actual limits are -$500 daily / -$1000 total).
+  # We stop 20% earlier so we never accidentally breach.
+  daily_stop_loss_usd: -400
+  max_total_drawdown_usd: -800
+
+  # Cap simultaneous positions per config so a single strategy can't over-expose.
+  max_positions_per_config: 3
+
+configs:
+  # 1. THE ENGINE — highest-expectancy, safest DD, biggest 30-day P&L in sweep.
+  #    +$676 est 30d, -$784 DD, 42.62 expect/trade.
+  - name: usdjpy_donchian_30m_3r
+    symbol: USDJPY
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2001
+    strategy_params:
+      donchian:
+        period: 20
+      exit:
+        tp_r_multiple: 3.0
+
+  # 2. Same setup, faster timeframe — captures USDJPY breakouts more frequently.
+  #    +$589 est 30d, -$819 DD, 22.00 expect/trade.
+  - name: usdjpy_donchian_15m_3r
+    symbol: USDJPY
+    strategy: DonchianBreakout
+    timeframe: 15m
+    magic_number: 2002
+    strategy_params:
+      donchian:
+        period: 20
+      exit:
+        tp_r_multiple: 3.0
+
+  # 3. Gold no-wick — the strategy from your reference video. Best on XAUUSD 30m.
+  #    +$455 est 30d, -$840 DD, 13.78 expect/trade.
+  - name: xauusd_nowick_30m_3r
+    symbol: XAUUSD
+    strategy: NoWick
+    timeframe: 30m
+    magic_number: 2003
+    strategy_params:
+      trend:
+        ema_period: 50
+      signal:
+        wick_max_pct: 0.05
+        body_min_pct: 0.60
+      entry:
+        retrace_bars: 5
+      exit:
+        sl_swing_lookback: 10
+        tp_r_multiple: 3.0
+
+  # 4. Real diversifier — different pair (NZD) + different strategy (MACD).
+  #    Uncorrelated with the USDJPY/XAU trend-follow group.
+  #    +$400 est 30d, -$836 DD, 13.64 expect/trade.
+  - name: nzdusd_macd_30m_3r
+    symbol: NZDUSD
+    strategy: MACDTrend
+    timeframe: 30m
+    magic_number: 2004
+    strategy_params:
+      macd:
+        fast_period: 12
+        slow_period: 26
+        signal_period: 9
+        require_zero_side: true
+      exit:
+        sl_swing_lookback: 10
+        tp_r_multiple: 3.0
+
+  # 5. USDCHF Donchian — low profit but even lower DD. Cheap diversification insurance.
+  #    +$58 est 30d, -$875 DD.
+  - name: usdchf_donchian_30m_3r
+    symbol: USDCHF
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2005
+    strategy_params:
+      donchian:
+        period: 20
+      exit:
+        tp_r_multiple: 3.0
+
+mt5:
+  # If IC Markets Raw Spread uses suffixes (e.g. XAUUSD.a, USDJPY.raw), map them here:
+  # symbol_map:
+  #   XAUUSD: XAUUSD.a
+  #   USDJPY: USDJPY.a
+  symbol_map: {}
+  poll_interval_s: 5
+
+ledger:
+  path: data/paper_ledger.sqlite
+
+# --- Projected 30-day picture (for reference) ---
+# Expected P&L:     +$2,178  (21.8% on $10k, target is +10%)
+# Trades/day:       4.11
+# Sum-DD (worst):   -$4,254  (if all configs draw down simultaneously)
+# Realistic DD:     ~-$1,200 (uncorrelated pairs, ~40% correlation baseline)
+# Kill switch caps: hard-stops at -$400 daily / -$800 total

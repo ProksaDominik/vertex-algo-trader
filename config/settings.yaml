@@ -1,0 +1,44 @@
+# metatraderbot — no-wick strategy config
+# All defaults are starting values; tune after the first backtest.
+
+symbol: XAUUSD
+timeframe: 15m
+
+capital:
+  initial_usd: 200
+  risk_usd_per_trade: 25
+  max_positions: 3
+  daily_stop_loss_usd: -75
+
+strategy:
+  trend:
+    # 50-EMA trend filter: price above EMA + EMA slope up  -> uptrend
+    #                     price below EMA + EMA slope down -> downtrend
+    ema_period: 50
+    require_slope_sign: true
+
+  signal:
+    # A "wickless" candle: wick on the trend-relevant side <= 5% of range,
+    # and body >= 60% of range (so we skip dojis).
+    wick_max_pct: 0.05
+    body_min_pct: 0.60
+
+  entry:
+    # After a wickless candle, wait up to N subsequent bars for price to
+    # retrace back to the flat side. Skip signal if it takes longer.
+    retrace_bars: 5
+
+  exit:
+    # Stop-loss: swing high (for shorts) or low (for longs) over the last N bars.
+    sl_swing_lookback: 10
+    # Take-profit: N * risk. 1.0 = 1:1 R:R (matches the video).
+    tp_r_multiple: 1.0
+
+backtest:
+  start_date: '2024-01-01'
+  end_date: '2024-12-31'
+  data_path: data/xauusd_15m.parquet
+  # XAUUSD spread + commission model (Phase 2 tightens this).
+  # Raw-spread broker estimate: 3-pip spread + $0.35/lot round-turn commission.
+  spread_price: 0.30      # $0.30 = 30 pips on gold (rough Raw-Spread average)
+  commission_per_lot: 3.50

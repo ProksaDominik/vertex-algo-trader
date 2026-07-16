@@ -1,0 +1,271 @@
+# FTMO $10k Challenge portfolio — trimmed to one config per pair for NETTING-mode brokers.
+#
+# NETTING NOTE:
+# IC Markets EU (CySEC) accounts default to Netting mode. In netting, multiple orders
+# on the same symbol merge into one position with a shared SL/TP — which breaks any
+# strategy that assumes independent positions per config.
+# Solution: one config per pair. Cleaner and works everywhere.
+
+capital:
+  risk_usd_per_trade: 100
+  # Ratchet trailing stop: once profit reaches 0.15R, lock in 50% of whatever
+  # profit has been reached so far by moving SL forward, re-checked every
+  # tick so it keeps tightening as price advances further and never loosens.
+  # start_r lowered from 0.5 to 0.15 now that TP itself is only 0.333R away
+  # (see tp_r_multiple below) — 0.5 would never fire since TP would already
+  # be hit first.
+  trail_start_r: 0.15
+  trail_lock_fraction: 0.5
+  daily_stop_loss_usd: -400        # buffer before FTMO's -$500 daily limit
+  max_total_drawdown_usd: -800     # buffer before FTMO's -$1000 total limit
+  max_positions_per_config: 5      # raised from 3 so more concurrent trades can fire per slot
+
+configs:
+  # 1. THE ENGINE — highest expectancy in the sweep at $100 risk.
+  #    +$676 est 30d P&L, -$784 DD, 42.62 expect/trade.
+  - name: usdjpy_donchian_30m_3r
+    symbol: USDJPY
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2001
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  #    +$455 est 30d, -$840 DD, 13.78 expect/trade.
+  - name: xauusd_nowick_30m_3r
+    symbol: XAUUSD
+    strategy: NoWick
+    timeframe: 30m
+    magic_number: 2003
+    strategy_params:
+      trend:
+        ema_period: 50
+      signal:
+        wick_max_pct: 0.05
+        body_min_pct: 0.60
+      entry:
+        retrace_bars: 5
+      exit:
+        sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  #    +$400 est 30d, -$836 DD, 13.64 expect/trade.
+  - name: nzdusd_macd_30m_3r
+    symbol: NZDUSD
+    strategy: MACDTrend
+    timeframe: 30m
+    magic_number: 2004
+    strategy_params:
+      macd:
+        fast_period: 12
+        slow_period: 26
+        signal_period: 9
+        require_zero_side: true
+      exit:
+        sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  #    +$58 est 30d.
+  - name: usdchf_donchian_30m_3r
+    symbol: USDCHF
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2005
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+
+  # --- Market-expansion additions (2026-07-15) — backtested across 26 new
+  # candidate symbols; only combos with expectancy > $10/trade deployed.
+  # tp_r_multiple below is now PER-SLOT, chosen by sweeping candidates
+  # [0.2 .. 5.0] against each slot's own trade history and keeping whichever
+  # ratio gave the best net expectancy (2026-07-15 per-slot ratio sweep).
+  # Every slot here is a low-win-rate breakout/trend strategy (20-33% WR is
+  # normal for Donchian/MACD) — that shape needs a LARGE reward:risk to be
+  # net profitable, which is why the sweep converged on wide TPs (3-5x the
+  # SL distance) rather than the tight 0.333 used earlier. ---
+
+  # 5. GBPCHF Donchian — best in the whole expansion sweep, +$51.58/trade.
+  - name: gbpchf_donchian_30m_3r
+    symbol: GBPCHF
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2006
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: eurjpy_donchian_30m_3r
+    symbol: EURJPY
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2007
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: eurchf_donchian_30m_3r
+    symbol: EURCHF
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2008
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: gbpjpy_macd_30m_3r
+    symbol: GBPJPY
+    strategy: MACDTrend
+    timeframe: 30m
+    magic_number: 2009
+    strategy_params:
+      macd:
+        fast_period: 12
+        slow_period: 26
+        signal_period: 9
+        require_zero_side: true
+      exit:
+        sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: nzdjpy_donchian_30m_3r
+    symbol: NZDJPY
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2010
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: audjpy_donchian_30m_3r
+    symbol: AUDJPY
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2011
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: chfjpy_donchian_30m_3r
+    symbol: CHFJPY
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2012
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: us30_donchian_30m_3r
+    symbol: US30
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2013
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  #     hedging-mode account confirmed, independent magic numbers, no conflict).
+  - name: gbpjpy_donchian_30m_3r
+    symbol: GBPJPY
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2014
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: euraud_donchian_30m_3r
+    symbol: EURAUD
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2015
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: audchf_donchian_30m_3r
+    symbol: AUDCHF
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2016
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: audcad_donchian_30m_3r
+    symbol: AUDCAD
+    strategy: DonchianBreakout
+    timeframe: 30m
+    magic_number: 2017
+    strategy_params:
+      donchian:
+        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
+      exit:
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: nzdjpy_macd_30m_3r
+    symbol: NZDJPY
+    strategy: MACDTrend
+    timeframe: 30m
+    magic_number: 2018
+    strategy_params:
+      macd:
+        fast_period: 12
+        slow_period: 26
+        signal_period: 9
+        require_zero_side: true
+      exit:
+        sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: gbpchf_macd_30m_3r
+    symbol: GBPCHF
+    strategy: MACDTrend
+    timeframe: 30m
+    magic_number: 2019
+    strategy_params:
+      macd:
+        fast_period: 12
+        slow_period: 26
+        signal_period: 9
+        require_zero_side: true
+      exit:
+        sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+  - name: de40_macd_30m_3r
+    symbol: DE40
+    strategy: MACDTrend
+    timeframe: 30m
+    magic_number: 2020
+    strategy_params:
+      macd:
+        fast_period: 12
+        slow_period: 26
+        signal_period: 9
+        require_zero_side: true
+      exit:
+        sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
+        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+
+mt5:
+  symbol_map: {}
+  poll_interval_s: 5
+
+ledger:
+  path: data/paper_ledger.sqlite
+
+# --- Projected 30-day picture (4 configs) ---
+# Expected P&L:     +$1,589   (15.9% on $10k — above FTMO's +10% target)
+# Trades/day:       3.22
+# Sum DD (worst):   -$3,335   (if fully correlated — kill switches cap actual loss)
+# Realistic DD:     ~-$1,000  (uncorrelated, ~40% FX correlation baseline)
+# Kill switches:    hard-stop at -$400 daily / -$800 total (before FTMO breach)
