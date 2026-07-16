@@ -696,6 +696,21 @@ st.markdown("""
 
 .stApp { background: var(--bg); }
 
+/* Trade-replay dialog — stretched to cover almost the whole viewport (the
+   default modal width is only ~800px, way too cramped for a candlestick
+   chart with room to read the price action). Targets both the dialog
+   element itself and its immediate content wrapper since Streamlit's
+   internal DOM nesting isn't a stable thing to depend on precisely. */
+div[data-testid="stDialog"] {
+    width: 95vw !important;
+    max-width: 1600px !important;
+}
+div[data-testid="stDialog"] > div {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 92vh !important;
+}
+
 * { font-family: 'Inter', sans-serif; }
 
 h1, h2, h3 {
@@ -1008,7 +1023,11 @@ def render_closed_positions() -> None:
                     opened_broker_ts = int(opened_dt.timestamp()) + offset
                     closed_broker_ts = int(closed_dt.timestamp()) + offset
                     duration_s = max(closed_broker_ts - opened_broker_ts, 60)
-                    padding_s = int(min(max(duration_s * 0.2, 5 * 60), 60 * 60))
+                    # Pad by as much as the trade itself lasted on each side
+                    # (min 30 min, max 3h) so the replay shows real market
+                    # context before/after the trade instead of a tight crop
+                    # that looks zoomed in on just the entry-to-exit move.
+                    padding_s = int(min(max(duration_s * 1.0, 30 * 60), 3 * 3600))
                     st.session_state["review_trade"] = {
                         "symbol": row["symbol"], "is_long": is_long,
                         "entry": float(row["entry_price"]), "sl": float(row["sl"]), "tp": float(row["tp"]),
@@ -1230,34 +1249,41 @@ def render_open_positions() -> None:
             components.html(html, height=540, scrolling=False)
 
 
-@st.fragment
+def _close_trade_review() -> None:
+    st.session_state["review_trade"] = None
+
+
+@st.dialog("🎬 Trade replay", width="large", on_dismiss=_close_trade_review)
+def _trade_review_dialog(review: dict) -> None:
+    """The actual replay dialog body — a real st.dialog modal (not an inline
+    block) so it covers most of the viewport and needs no scrolling to reach,
+    regardless of where in the closed-positions table the "📈" button was
+    clicked. Sized up via the '.stApp div[data-testid="stDialog"]' CSS rule
+    near the top of the file (the built-in "large" width is still only
+    ~800px — nowhere near enough room to read a candlestick chart)."""
+    if st.button("✕ Close replay"):
+        st.session_state["review_trade"] = None
+        st.rerun()
+    html = build_closed_trade_chart_html(
+        review["symbol"], review["is_long"], review["entry"], review["sl"], review["tp"],
+        review["exit_price"], review["pnl"], review["exit_reason"],
+        review["opened_broker_ts"], review["closed_broker_ts"],
+        review["ts_from"], review["ts_to"],
+        height=620,
+    )
+    components.html(html, height=680, scrolling=False)
+
+
 def render_trade_review() -> None:
-    """The closed-trade replay animation, deliberately kept in its own
-    fragment with NO run_every timer (same reasoning as render_open_positions
-    above): the animation is a self-contained JS component that plays out
-    once and then sits still, so it must NOT be torn down and remounted every
-    refresh_s tick the way it would be if it lived inside an auto-refreshing
-    fragment. Called right after render_closed_positions (see the bottom of
-    the file) so it renders directly below the table it was opened from. The
-    "📈" button that populates st.session_state["review_trade"] lives over in
-    render_closed_positions and calls st.rerun() (full-app scope) once after
-    setting it, which is what makes this fragment notice the new selection
-    and render for the first time."""
+    """Triggers the trade-replay dialog. NOT a fragment — a plain function is
+    enough since it only needs to run once on a genuine full-script rerun
+    (which the "📈" button's st.rerun() call forces, see
+    render_closed_positions); Streamlit itself then keeps the dialog open
+    across any further reruns for as long as review_trade stays set, without
+    this function needing to be called again."""
     review = st.session_state.get("review_trade")
-    if not review:
-        return
-    with st.container(border=True):
-        st.subheader("🎬 Trade replay")
-        if st.button("✕ Close replay"):
-            st.session_state["review_trade"] = None
-            st.rerun()
-        html = build_closed_trade_chart_html(
-            review["symbol"], review["is_long"], review["entry"], review["sl"], review["tp"],
-            review["exit_price"], review["pnl"], review["exit_reason"],
-            review["opened_broker_ts"], review["closed_broker_ts"],
-            review["ts_from"], review["ts_to"],
-        )
-        components.html(html, height=560, scrolling=False)
+    if review:
+        _trade_review_dialog(review)
 
 
 render_summary()
