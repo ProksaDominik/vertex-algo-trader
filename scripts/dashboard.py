@@ -407,7 +407,14 @@ def _broker_offset_seconds(symbol: str) -> int:
     """Broker-server clock minus true UTC, measured via a live tick (see the
     'Opened' timestamp fix earlier — MT5's own timestamps are in the broker's
     clock, not true UTC, commonly hours off). Needed to convert the ledger's
-    true-UTC opened/closed timestamps into the range copy_rates_range expects."""
+    true-UTC opened/closed timestamps into the range copy_rates_range expects.
+
+    Called exactly once per review (when the button is clicked, see
+    render_history), NOT on every render — baking a freshly-measured value
+    into the chart HTML on every fragment rerun would make the HTML differ
+    by a second or two each cycle (tick.time jitter), which defeats Streamlit's
+    identical-content check and remounts the iframe — restarting the
+    animation and flashing every few seconds."""
     if not _MT5_AVAILABLE or not mt5.initialize():
         return 0
     tick = mt5.symbol_info_tick(symbol)
@@ -419,26 +426,22 @@ def _broker_offset_seconds(symbol: str) -> int:
 
 def build_closed_trade_chart_html(
     symbol: str, is_long: bool, entry: float, sl: float, tp: float, exit_price: float,
-    pnl: float, exit_reason: str, opened_ts: datetime, closed_ts: datetime,
-    default_timeframe: str = "15m", height: int = 420,
+    pnl: float, exit_reason: str, opened_broker_ts: int, closed_broker_ts: int,
+    ts_from: int, ts_to: int, height: int = 460,
 ) -> str:
-    """Static replay chart for a CLOSED trade: candles from before entry to
-    after exit, with entry/exit markers plus SL/TP lines, so you can see
-    exactly how price moved through the life of the trade. No live polling
-    needed (the trade's already over) — one fetch on load / timeframe switch."""
+    """Animated replay of a CLOSED trade: real 1-minute candles reveal one
+    (or a small batch) at a time from before entry to after exit, while SL/TP/
+    entry/exit are drawn as persistent horizontal lines for the whole
+    animation — the entry/exit arrow markers additionally pop in the instant
+    the reveal reaches that bar. All timestamps are precomputed once by the
+    caller (see render_history) so this function is a pure formatter with no
+    MT5 calls and byte-identical output across Streamlit fragment reruns —
+    required so the auto-refresh timer doesn't remount the iframe mid-animation."""
     marker_shape = "arrowUp" if is_long else "arrowDown"
     win = pnl > 0
     exit_color = _UP if win else _DOWN
-    div_id = f"lwc_{int(opened_ts.timestamp())}_{symbol}"
+    div_id = f"lwc_{opened_broker_ts}_{symbol}"
     precision, min_move = _price_precision(symbol)
-
-    offset = _broker_offset_seconds(symbol)
-    opened_broker_ts = int(opened_ts.timestamp()) + offset
-    closed_broker_ts = int(closed_ts.timestamp()) + offset
-    duration_s = max(closed_broker_ts - opened_broker_ts, 60)
-    padding_s = int(min(max(duration_s * 0.6, 2 * 3600), 24 * 3600))
-    ts_from = opened_broker_ts - padding_s
-    ts_to = closed_broker_ts + padding_s
 
     reason_label = {"tp": "hit take-profit", "sl": "hit stop-loss (or trailing stop)", "manual": "closed manually"}.get(exit_reason, exit_reason)
 
@@ -446,6 +449,8 @@ def build_closed_trade_chart_html(
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
   #chart_wrap_{div_id} * {{ font-family: 'Inter', sans-serif; }}
+  #chart_wrap_{div_id} button:hover {{ background:rgba(255,255,255,0.1) !important; }}
+  #chart_wrap_{div_id} button:disabled {{ opacity:0.35; cursor:default; }}
 </style>
 <div id="chart_wrap_{div_id}" style="background:{_BG}; padding:8px; border-radius:10px; border:1px solid rgba(255,255,255,0.06);">
   <div style="margin-bottom:8px; display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;">
@@ -456,10 +461,12 @@ def build_closed_trade_chart_html(
       {symbol} {'long' if is_long else 'short'} &nbsp; Entry {entry:.{precision}f} → Exit {exit_price:.{precision}f} &nbsp; ({reason_label})
     </div>
   </div>
-  <div style="margin-bottom:6px;">
-    <button onclick="window.__switchTf_{div_id}('15m')" style="background:rgba(255,255,255,0.04);color:{_AXIS_LABEL};border:1px solid rgba(255,255,255,0.1);padding:4px 10px;border-radius:6px;cursor:pointer;margin-right:6px;">15m</button>
-    <button onclick="window.__switchTf_{div_id}('1m')" style="background:rgba(255,255,255,0.04);color:{_AXIS_LABEL};border:1px solid rgba(255,255,255,0.1);padding:4px 10px;border-radius:6px;cursor:pointer;">1m</button>
-    <span id="tf_label_{div_id}" style="color:{_AXIS_LABEL};margin-left:10px;">{default_timeframe}</span>
+  <div style="margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+    <button id="play_{div_id}" style="background:rgba(255,255,255,0.04);color:{_AXIS_LABEL};border:1px solid rgba(255,255,255,0.1);padding:4px 10px;border-radius:6px;cursor:pointer;">▶ Play</button>
+    <button id="pause_{div_id}" style="background:rgba(255,255,255,0.04);color:{_AXIS_LABEL};border:1px solid rgba(255,255,255,0.1);padding:4px 10px;border-radius:6px;cursor:pointer;">⏸ Pause</button>
+    <button id="restart_{div_id}" style="background:rgba(255,255,255,0.04);color:{_AXIS_LABEL};border:1px solid rgba(255,255,255,0.1);padding:4px 10px;border-radius:6px;cursor:pointer;">⟲ Restart</button>
+    <span style="color:{_AXIS_LABEL};opacity:0.7;margin-left:8px;font-size:0.8rem;">1m candles</span>
+    <span id="progress_{div_id}" style="color:{_AXIS_LABEL};opacity:0.85;margin-left:auto;font-size:0.8rem;"></span>
   </div>
   <div id="{div_id}" style="width:100%; height:{height}px;"></div>
 </div>
@@ -498,50 +505,103 @@ def build_closed_trade_chart_html(
   }});
   window.addEventListener("resize", () => chart.applyOptions({{ width: container.clientWidth }}));
 
-  let tf = "{default_timeframe}";
-
   function snapToBar(bars, targetTime) {{
     const onOrBefore = bars.filter(b => b.time <= targetTime);
     return onOrBefore.length ? onOrBefore[onOrBefore.length - 1].time : bars[0].time;
   }}
-
-  async function load(newTf) {{
-    tf = newTf || tf;
-    // Re-derive the padded range for the new timeframe (tighter timeframe ->
-    // proportionally tighter padding so it doesn't look absurdly zoomed out).
-    const tfSeconds = {{'1m': 60, '15m': 900}}[tf] || 900;
-    const duration = {closed_broker_ts} - {opened_broker_ts};
-    const padding = Math.min(Math.max(duration * 0.6, 2 * 3600), 24 * 3600);
-    const from = {opened_broker_ts} - padding;
-    const to = {closed_broker_ts} + padding;
-    try {{
-      const res = await fetch(`{CHART_API_URL}/history?symbol={symbol}&timeframe=${{tf}}&from=${{from}}&to=${{to}}`);
-      const data = await res.json();
-      if (!data.bars || !data.bars.length) return;
-      series.setData(data.bars);
-      chart.timeScale().fitContent();
-
-      const lo = Math.min({sl}, {tp}, {entry});
-      const hi = Math.max({sl}, {tp}, {entry});
-      const firstT = data.bars[0].time, lastT = data.bars[data.bars.length - 1].time;
-      rangeSeries.setData([{{time: firstT, value: lo}}, {{time: lastT, value: hi}}]);
-
-      series.createPriceLine({{price: {sl}, color: "{_SL_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "SL"}});
-      series.createPriceLine({{price: {tp}, color: "{_TP_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "TP"}});
-
-      const entryBarTime = snapToBar(data.bars, {opened_broker_ts});
-      const exitBarTime = snapToBar(data.bars, {closed_broker_ts});
-      series.setMarkers([
-        {{time: entryBarTime, position: {'"belowBar"' if is_long else '"aboveBar"'}, color: "{_ENTRY_COLOR}", shape: "{marker_shape}", text: "Entry " + ({entry}).toFixed({precision})}},
-        {{time: exitBarTime, position: {'"aboveBar"' if is_long else '"belowBar"'}, color: "{exit_color}", shape: {'"arrowDown"' if is_long else '"arrowUp"'}, text: "Exit " + ({exit_price}).toFixed({precision})}},
-      ]);
-    }} catch (e) {{ /* transient fetch error — chart_api.py may not be running */ }}
+  function fmtTime(t) {{
+    const d = new Date(t * 1000);
+    return String(d.getUTCMonth()+1).padStart(2,'0') + "-" + String(d.getUTCDate()).padStart(2,'0') + " " +
+           String(d.getUTCHours()).padStart(2,'0') + ":" + String(d.getUTCMinutes()).padStart(2,'0');
   }}
 
-  window.__switchTf_{div_id} = function(newTf) {{
-    document.getElementById("tf_label_{div_id}").innerText = newTf;
-    load(newTf);
-  }};
+  let allBars = [];
+  let idx = 0, barsPerTick = 1, frameMs = 60, timer = null;
+  let entryBarTime = null, exitBarTime = null;
+
+  function updateMarkers(visibleBars) {{
+    const markers = [];
+    if (entryBarTime !== null && visibleBars.some(b => b.time === entryBarTime)) {{
+      markers.push({{time: entryBarTime, position: {'"belowBar"' if is_long else '"aboveBar"'}, color: "{_ENTRY_COLOR}", shape: "{marker_shape}", text: "Entry " + ({entry}).toFixed({precision})}});
+    }}
+    if (exitBarTime !== null && visibleBars.some(b => b.time === exitBarTime)) {{
+      markers.push({{time: exitBarTime, position: {'"aboveBar"' if is_long else '"belowBar"'}, color: "{exit_color}", shape: {'"arrowDown"' if is_long else '"arrowUp"'}, text: "Exit " + ({exit_price}).toFixed({precision})}});
+    }}
+    series.setMarkers(markers);
+  }}
+
+  function render() {{
+    const visible = allBars.slice(0, idx);
+    series.setData(visible);
+    updateMarkers(visible);
+    const label = document.getElementById("progress_{div_id}");
+    if (label) {{
+      label.innerText = visible.length
+        ? `${{fmtTime(visible[visible.length - 1].time)}}  ·  bar ${{visible.length}}/${{allBars.length}}`
+        : "";
+    }}
+  }}
+
+  function pause() {{
+    if (timer) {{ clearInterval(timer); timer = null; }}
+  }}
+  function play() {{
+    if (timer || idx >= allBars.length) return;
+    timer = setInterval(() => {{
+      idx = Math.min(idx + barsPerTick, allBars.length);
+      render();
+      if (idx >= allBars.length) pause();
+    }}, frameMs);
+  }}
+  function restart() {{
+    pause();
+    idx = Math.min(1, allBars.length);
+    render();
+    play();
+  }}
+
+  document.getElementById("play_{div_id}").onclick = play;
+  document.getElementById("pause_{div_id}").onclick = pause;
+  document.getElementById("restart_{div_id}").onclick = restart;
+
+  async function load() {{
+    try {{
+      const res = await fetch(`{CHART_API_URL}/history?symbol={symbol}&timeframe=1m&from={ts_from}&to={ts_to}`);
+      const data = await res.json();
+      if (!data.bars || !data.bars.length) return;
+      allBars = data.bars;
+
+      // Fixed viewport for the whole animation — computed from the full
+      // fetched range up front so the chart doesn't rescale/jump as more
+      // candles get revealed each tick.
+      let lo = Math.min({sl}, {tp}, {entry}, {exit_price});
+      let hi = Math.max({sl}, {tp}, {entry}, {exit_price});
+      for (const b of allBars) {{ lo = Math.min(lo, b.low); hi = Math.max(hi, b.high); }}
+      const firstT = allBars[0].time, lastT = allBars[allBars.length - 1].time;
+      rangeSeries.setData([{{time: firstT, value: lo}}, {{time: lastT, value: hi}}]);
+      chart.timeScale().setVisibleRange({{from: firstT, to: lastT}});
+
+      // SL/TP/Entry/Exit as persistent reference lines, visible for the
+      // entire animation regardless of how many candles have been revealed.
+      series.createPriceLine({{price: {sl}, color: "{_SL_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "SL"}});
+      series.createPriceLine({{price: {tp}, color: "{_TP_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "TP"}});
+      series.createPriceLine({{price: {entry}, color: "{_ENTRY_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, title: "Entry"}});
+      series.createPriceLine({{price: {exit_price}, color: "{exit_color}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, title: "Exit"}});
+
+      entryBarTime = snapToBar(allBars, {opened_broker_ts});
+      exitBarTime = snapToBar(allBars, {closed_broker_ts});
+
+      // Reveal in real time where possible, but cap total animation length
+      // so a multi-hour trade doesn't take minutes to play out.
+      const targetTotalMs = 9000, minFrameMs = 15, maxFrameMs = 120;
+      frameMs = Math.min(maxFrameMs, Math.max(minFrameMs, targetTotalMs / allBars.length));
+      barsPerTick = frameMs === minFrameMs ? Math.max(1, Math.ceil((allBars.length * minFrameMs) / targetTotalMs)) : 1;
+
+      idx = Math.min(1, allBars.length);
+      render();
+      play();
+    }} catch (e) {{ /* transient fetch error — chart_api.py may not be running */ }}
+  }}
 
   load();
 }})();
@@ -940,26 +1000,34 @@ def render_history() -> None:
                 cols[6].write(closed_sk.strftime("%Y-%m-%d %H:%M:%S"))
                 cols[7].write(_fmt_duration(closed_dt - opened_dt))
                 if cols[8].button("📈", key=f"review_{row['ticket']}", help="See how this trade played out"):
+                    # Broker-clock offset + padded fetch range computed ONCE,
+                    # right here, and frozen into session_state — NOT
+                    # recomputed inside the chart builder on every fragment
+                    # rerun (that used to bake a freshly-measured, slightly
+                    # jittery timestamp into the HTML each cycle, which made
+                    # Streamlit think the component's content changed and
+                    # remount the iframe — restarting the animation and
+                    # flashing every refresh tick).
+                    offset = _broker_offset_seconds(row["symbol"])
+                    opened_broker_ts = int(opened_dt.timestamp()) + offset
+                    closed_broker_ts = int(closed_dt.timestamp()) + offset
+                    duration_s = max(closed_broker_ts - opened_broker_ts, 60)
+                    padding_s = int(min(max(duration_s * 0.2, 5 * 60), 60 * 60))
                     st.session_state["review_trade"] = {
                         "symbol": row["symbol"], "is_long": is_long,
                         "entry": float(row["entry_price"]), "sl": float(row["sl"]), "tp": float(row["tp"]),
                         "exit_price": float(row["exit_price"]), "pnl": float(pnl), "exit_reason": row["exit_reason"],
-                        "opened_ts": opened_dt.to_pydatetime(), "closed_ts": closed_dt.to_pydatetime(),
+                        "opened_broker_ts": opened_broker_ts, "closed_broker_ts": closed_broker_ts,
+                        "ts_from": opened_broker_ts - padding_s, "ts_to": closed_broker_ts + padding_s,
                     }
-
-            review = st.session_state.get("review_trade")
-            if review:
-                st.divider()
-                close_col, _ = st.columns([0.15, 0.85])
-                if close_col.button("✕ Close replay"):
-                    st.session_state["review_trade"] = None
+                    # This fragment reruns on its own every refresh_s (see the
+                    # decorator above) — the actual chart is rendered by
+                    # render_trade_review(), a SEPARATE fragment with no timer,
+                    # so the animation isn't restarted every few seconds. A
+                    # plain st.rerun() (full-app scope, the default even when
+                    # called from inside a fragment) is needed here once, to
+                    # make that other fragment notice the new selection.
                     st.rerun()
-                html = build_closed_trade_chart_html(
-                    review["symbol"], review["is_long"], review["entry"], review["sl"], review["tp"],
-                    review["exit_price"], review["pnl"], review["exit_reason"],
-                    review["opened_ts"], review["closed_ts"],
-                )
-                components.html(html, height=540, scrolling=False)
 
     with st.container(border=True):
         # --- Live equity curve, ALWAYS normalized to target account size ---
@@ -1149,6 +1217,35 @@ def render_open_positions() -> None:
             components.html(html, height=540, scrolling=False)
 
 
+@st.fragment
+def render_trade_review() -> None:
+    """The closed-trade replay animation, deliberately kept in its own
+    fragment with NO run_every timer (same reasoning as render_open_positions
+    above): the animation is a self-contained JS component that plays out
+    once and then sits still, so it must NOT be torn down and remounted every
+    refresh_s tick the way it would be if it lived inside render_history's
+    auto-refreshing fragment. The "📈" button that populates
+    st.session_state["review_trade"] lives over in render_history and calls
+    st.rerun() (full-app scope) once after setting it, which is what makes
+    this fragment notice the new selection and render for the first time."""
+    review = st.session_state.get("review_trade")
+    if not review:
+        return
+    with st.container(border=True):
+        st.subheader("🎬 Trade replay")
+        if st.button("✕ Close replay"):
+            st.session_state["review_trade"] = None
+            st.rerun()
+        html = build_closed_trade_chart_html(
+            review["symbol"], review["is_long"], review["entry"], review["sl"], review["tp"],
+            review["exit_price"], review["pnl"], review["exit_reason"],
+            review["opened_broker_ts"], review["closed_broker_ts"],
+            review["ts_from"], review["ts_to"],
+        )
+        components.html(html, height=560, scrolling=False)
+
+
 render_summary()
 render_open_positions()
 render_history()
+render_trade_review()
