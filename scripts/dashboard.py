@@ -442,6 +442,7 @@ def build_closed_trade_chart_html(
     exit_color = _UP if win else _DOWN
     div_id = f"lwc_{opened_broker_ts}_{symbol}"
     precision, min_move = _price_precision(symbol)
+    price_delta_js = f"(current - {entry})" if is_long else f"({entry} - current)"
 
     reason_label = {"tp": "hit take-profit", "sl": "hit stop-loss (or trailing stop)", "manual": "closed manually"}.get(exit_reason, exit_reason)
 
@@ -454,7 +455,7 @@ def build_closed_trade_chart_html(
 </style>
 <div id="chart_wrap_{div_id}" style="background:{_BG}; padding:8px; border-radius:10px; border:1px solid rgba(255,255,255,0.06);">
   <div style="margin-bottom:8px; display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-    <div style="font-size:1.4rem; font-weight:700; color:{exit_color};">
+    <div id="pnl_{div_id}" style="font-size:1.4rem; font-weight:700; color:{exit_color};">
       {'+' if win else ''}{pnl:.2f} USD
     </div>
     <div style="color:{_AXIS_LABEL}; font-size:0.85rem; opacity:0.85;">
@@ -525,6 +526,17 @@ def build_closed_trade_chart_html(
   let allBars = [];
   let idx = 0, barsPerTick = 1, frameMs = 60, timer = null;
   let entryBarTime = null, exitBarTime = null;
+  let dollarsPerUnit = 0;
+
+  function updatePnl(visibleBars) {{
+    const pnlEl = document.getElementById("pnl_{div_id}");
+    if (!pnlEl || !visibleBars.length || !dollarsPerUnit) return;
+    const current = visibleBars[visibleBars.length - 1].close;
+    const priceDelta = {price_delta_js};
+    const live = priceDelta * dollarsPerUnit;
+    pnlEl.innerText = (live >= 0 ? "+" : "") + live.toFixed(2) + " USD";
+    pnlEl.style.color = live >= 0 ? "{_UP}" : "{_DOWN}";
+  }}
 
   function updateMarkers(visibleBars) {{
     const markers = [];
@@ -541,6 +553,7 @@ def build_closed_trade_chart_html(
     const visible = allBars.slice(0, idx);
     series.setData(visible);
     updateMarkers(visible);
+    updatePnl(visible);
     const label = document.getElementById("progress_{div_id}");
     if (label) {{
       label.innerText = visible.length
@@ -580,13 +593,30 @@ def build_closed_trade_chart_html(
 
       // Fixed viewport for the whole animation — computed from the full
       // fetched range up front so the chart doesn't rescale/jump as more
-      // candles get revealed each tick.
-      let lo = Math.min({sl}, {tp}, {entry}, {exit_price});
-      let hi = Math.max({sl}, {tp}, {entry}, {exit_price});
+      // candles get revealed each tick. Deliberately NOT including sl/tp
+      // here: Donchian-style stops can sit far outside where price actually
+      // traded (the ratchet trailing stop usually closes the trade well
+      // before the original, wide SL is ever approached), and forcing the
+      // axis to stretch all the way out to a stop that was never touched
+      // squashed the real candle detail into an unreadable sliver. SL/TP
+      // still get drawn as price lines below — they'll just sit off-screen
+      // if they're that far away, same as a real trading platform would show.
+      let lo = Math.min({entry}, {exit_price});
+      let hi = Math.max({entry}, {exit_price});
       for (const b of allBars) {{ lo = Math.min(lo, b.low); hi = Math.max(hi, b.high); }}
+      const span = hi - lo;
+      lo -= span * 0.08;
+      hi += span * 0.08;
       const firstT = allBars[0].time, lastT = allBars[allBars.length - 1].time;
       rangeSeries.setData([{{time: firstT, value: lo}}, {{time: lastT, value: hi}}]);
       chart.timeScale().setVisibleRange({{from: firstT, to: lastT}});
+
+      // Exact conversion factor from price movement to dollars, derived from
+      // the one real data point we have (the trade's actual final pnl at
+      // exit_price) — profit is linear in price for a fixed lot size, so
+      // this is precise, not an approximation.
+      const exitDelta = {price_delta_js.replace("current", str(exit_price))};
+      dollarsPerUnit = exitDelta !== 0 ? {pnl} / exitDelta : 0;
 
       // SL/TP/Entry/Exit as persistent reference lines, visible for the
       // entire animation regardless of how many candles have been revealed.
@@ -1033,17 +1063,20 @@ def render_closed_positions() -> None:
                     opened_broker_ts = int(opened_dt.timestamp()) + offset
                     closed_broker_ts = int(closed_dt.timestamp()) + offset
                     duration_s = max(closed_broker_ts - opened_broker_ts, 60)
-                    # Pad by 1.5x the trade's own duration on each side (min
-                    # 45 min, max 4h) — wide enough to actually read the
-                    # market structure around the trade instead of a tight
-                    # crop around just the entry-to-exit move.
-                    padding_s = int(min(max(duration_s * 1.5, 45 * 60), 4 * 3600))
+                    # Generous context BEFORE entry (1.5x the trade's own
+                    # duration, min 45 min, max 4h) so there's real market
+                    # structure to read leading into it — but only a couple
+                    # of minutes AFTER exit, since nothing about the trade
+                    # itself happens after it closes and padding that side
+                    # the same amount just added a long empty tail.
+                    pre_padding_s = int(min(max(duration_s * 1.5, 45 * 60), 4 * 3600))
+                    post_padding_s = 120
                     st.session_state["review_trade"] = {
                         "symbol": row["symbol"], "is_long": is_long,
                         "entry": float(row["entry_price"]), "sl": float(row["sl"]), "tp": float(row["tp"]),
                         "exit_price": float(row["exit_price"]), "pnl": float(pnl), "exit_reason": row["exit_reason"],
                         "opened_broker_ts": opened_broker_ts, "closed_broker_ts": closed_broker_ts,
-                        "ts_from": opened_broker_ts - padding_s, "ts_to": closed_broker_ts + padding_s,
+                        "ts_from": opened_broker_ts - pre_padding_s, "ts_to": closed_broker_ts + post_padding_s,
                     }
                     # This fragment reruns on its own every refresh_s (see the
                     # decorator above) — the actual chart is rendered by
