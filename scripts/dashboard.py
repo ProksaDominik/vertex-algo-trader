@@ -443,6 +443,12 @@ def build_closed_trade_chart_html(
     div_id = f"lwc_{opened_broker_ts}_{symbol}"
     precision, min_move = _price_precision(symbol)
     price_delta_js = f"(current - {entry})" if is_long else f"({entry} - current)"
+    # Deliberately NOT reusing _SL_COLOR/_TP_COLOR (which alias the same
+    # blue/pink used for up/down candles and profit/loss everywhere else) —
+    # in this chart specifically, SL/TP need to read as "risk levels", not
+    # blend in with the candle-color language, so they get their own
+    # unambiguous red/gold here.
+    replay_sl_color, replay_tp_color = "#ff5252", "#ffca28"
 
     reason_label = {"tp": "hit take-profit", "sl": "hit stop-loss (or trailing stop)", "manual": "closed manually"}.get(exit_reason, exit_reason)
 
@@ -528,14 +534,30 @@ def build_closed_trade_chart_html(
   let entryBarTime = null, exitBarTime = null;
   let dollarsPerUnit = 0;
 
+  function setPnlText(el, value) {{
+    el.innerText = (value >= 0 ? "+" : "") + value.toFixed(2) + " USD";
+    el.style.color = value >= 0 ? "{_UP}" : "{_DOWN}";
+  }}
+
   function updatePnl(visibleBars) {{
     const pnlEl = document.getElementById("pnl_{div_id}");
-    if (!pnlEl || !visibleBars.length || !dollarsPerUnit) return;
+    if (!pnlEl || !visibleBars.length) return;
+    const lastTime = visibleBars[visibleBars.length - 1].time;
+    // Only "live" while the position is actually open: 0 before entry,
+    // frozen at the real final P&L once exit is reached — not still
+    // wobbling with price action that happened after the trade closed.
+    if (entryBarTime === null || lastTime < entryBarTime) {{
+      setPnlText(pnlEl, 0);
+      return;
+    }}
+    if (exitBarTime !== null && lastTime >= exitBarTime) {{
+      setPnlText(pnlEl, {pnl});
+      return;
+    }}
+    if (!dollarsPerUnit) return;
     const current = visibleBars[visibleBars.length - 1].close;
     const priceDelta = {price_delta_js};
-    const live = priceDelta * dollarsPerUnit;
-    pnlEl.innerText = (live >= 0 ? "+" : "") + live.toFixed(2) + " USD";
-    pnlEl.style.color = live >= 0 ? "{_UP}" : "{_DOWN}";
+    setPnlText(pnlEl, priceDelta * dollarsPerUnit);
   }}
 
   function updateMarkers(visibleBars) {{
@@ -618,12 +640,14 @@ def build_closed_trade_chart_html(
       const exitDelta = {price_delta_js.replace("current", str(exit_price))};
       dollarsPerUnit = exitDelta !== 0 ? {pnl} / exitDelta : 0;
 
-      // SL/TP/Entry/Exit as persistent reference lines, visible for the
-      // entire animation regardless of how many candles have been revealed.
-      series.createPriceLine({{price: {sl}, color: "{_SL_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "SL"}});
-      series.createPriceLine({{price: {tp}, color: "{_TP_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "TP"}});
-      series.createPriceLine({{price: {entry}, color: "{_ENTRY_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, title: "Entry"}});
-      series.createPriceLine({{price: {exit_price}, color: "{exit_color}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, title: "Exit"}});
+      // SL/TP as bold, unambiguous reference lines — thicker and in their
+      // own red/gold (not the candle-color blue/pink) so they read as risk
+      // levels at a glance. Entry/exit are already fully identified by their
+      // arrow markers below (price is right there in the marker text), so
+      // no separate price line for those — cut to avoid four overlapping
+      // lines/labels competing for attention in an already-tight view.
+      series.createPriceLine({{price: {sl}, color: "{replay_sl_color}", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: "SL"}});
+      series.createPriceLine({{price: {tp}, color: "{replay_tp_color}", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: "TP"}});
 
       entryBarTime = snapToBar(allBars, {opened_broker_ts});
       exitBarTime = snapToBar(allBars, {closed_broker_ts});
@@ -1063,13 +1087,13 @@ def render_closed_positions() -> None:
                     opened_broker_ts = int(opened_dt.timestamp()) + offset
                     closed_broker_ts = int(closed_dt.timestamp()) + offset
                     duration_s = max(closed_broker_ts - opened_broker_ts, 60)
-                    # Generous context BEFORE entry (1.5x the trade's own
-                    # duration, min 45 min, max 4h) so there's real market
-                    # structure to read leading into it — but only a couple
-                    # of minutes AFTER exit, since nothing about the trade
-                    # itself happens after it closes and padding that side
-                    # the same amount just added a long empty tail.
-                    pre_padding_s = int(min(max(duration_s * 1.5, 45 * 60), 4 * 3600))
+                    # Just the trade itself, plus a couple of minutes on each
+                    # side to render the entry/exit bars cleanly — no
+                    # surrounding market context. Context padding made the
+                    # y-axis stretch to cover whatever happened before/after
+                    # the trade too, squashing the trade's own move down to
+                    # an unreadable sliver.
+                    pre_padding_s = 120
                     post_padding_s = 120
                     st.session_state["review_trade"] = {
                         "symbol": row["symbol"], "is_long": is_long,
