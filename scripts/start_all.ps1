@@ -44,4 +44,11 @@ if (-not (Test-Running 'streamlit')) {
         -ArgumentList '-m streamlit run scripts\dashboard.py --server.headless true' `
         -WorkingDirectory $dir -WindowStyle Hidden `
         -RedirectStandardOutput "$dir\logs\stdout_dashboard.log" -RedirectStandardError "$dir\logs\stderr_dashboard.log"
+    Start-Sleep -Seconds 5  # give Streamlit time to bind the port before opening the browser
 }
+
+# Open the dashboard in the default browser — MT5 already opens its own
+# visible window above, this is the equivalent "visible" step for the web
+# interface. Runs every time (harmless if it just opens another tab onto
+# the same already-running dashboard).
+Start-Process "http://localhost:8501"
