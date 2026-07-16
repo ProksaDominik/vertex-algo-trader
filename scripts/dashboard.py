@@ -452,8 +452,8 @@ def load_ledger(path: Path):
     return signals, orders, closed, heartbeats
 
 
-_LOGO_PATH = ROOT / "scripts" / "assets" / "vertex_logo.png"
-_LOGO_SMALL_PATH = ROOT / "scripts" / "assets" / "vertex_logo_small.png"
+_LOGO_PATH = ROOT / "scripts" / "assets" / "vertex_v_icon.png"
+_LOGO_SMALL_PATH = ROOT / "scripts" / "assets" / "vertex_v_icon_small.png"
 
 
 @st.cache_data
@@ -564,8 +564,8 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 hr { border-color: var(--panel-border) !important; }
 
 .app-logo {
-    display: inline-block; width: 34px; height: 34px; vertical-align: middle;
-    margin-right: 8px; border-radius: 6px;
+    display: inline-block; width: 58px; height: 58px; vertical-align: middle;
+    margin-right: 10px;
 }
 
 .ticker-chip {
@@ -603,7 +603,7 @@ ledger_path = ROOT / "data" / (
 st.markdown(f"""
 <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
   <img class="app-logo" src="{_logo_data_uri(_LOGO_SMALL_PATH)}" />
-  <span style="font-size:1.8rem; font-weight:600; color:#eef2f6;">
+  <span style="font-size:2.3rem; font-weight:600; color:#eef2f6;">
     Vertex Algo Bot
   </span>
   <span style="font-size:1.05rem; color:#4c6ef5; opacity:0.9;">
