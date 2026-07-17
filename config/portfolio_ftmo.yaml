@@ -19,6 +19,15 @@ capital:
   daily_stop_loss_usd: -400        # buffer before FTMO's -$500 daily limit
   max_total_drawdown_usd: -800     # buffer before FTMO's -$1000 total limit
   max_positions_per_config: 5      # raised from 3 so more concurrent trades can fire per slot
+  # Caps total risk exposed to any single currency (incl. XAU) at once,
+  # summed across ALL slots — not just one. max_positions_per_config alone
+  # doesn't stop many DIFFERENT slots (different pairs, different
+  # strategies) from all independently piling into the same currency; a
+  # single broad move then hits all of them at once. Seen live more than
+  # once (a GBP/CHF cluster, then a broader USD/JPY/GBP cluster) — capped
+  # at 3R here specifically because the FTMO goal is passing the challenge
+  # (protect the drawdown budget), not squeezing out max correlated size.
+  max_currency_exposure_r: 3.0
 
 configs:
   # 1. THE ENGINE — highest expectancy in the sweep at $100 risk.

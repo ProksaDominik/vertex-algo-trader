@@ -341,6 +341,7 @@ class MT5Engine:
         tp: float,
         magic: int,
         comment: str = "",
+        signal_entry_price: float | None = None,
     ) -> OrderResult:
         broker_sym = self.resolve_symbol(symbol)
         tick = mt5.symbol_info_tick(broker_sym)
@@ -348,8 +349,40 @@ class MT5Engine:
         if tick is None or info is None:
             raise RuntimeError(f"No tick/info for {broker_sym}")
 
+        # Indices in particular (US30, DE40, ...) go SYMBOL_TRADE_MODE_DISABLED
+        # outside their own session even though ticks keep updating, which
+        # otherwise shows up as a live signal firing, an order_send round
+        # trip, and a "Trade disabled" rejection every time — same lost
+        # signal either way, but skipping the doomed order_send call entirely
+        # gives a clear, honest reason in the log/ledger instead of a bare
+        # broker rejection code.
+        if info.trade_mode == mt5.SYMBOL_TRADE_MODE_DISABLED:
+            return OrderResult(0, lots, 0.0, sl, tp, -1, "Market closed for this symbol right now")
+
         order_type = mt5.ORDER_TYPE_BUY if direction == "long" else mt5.ORDER_TYPE_SELL
         price = tick.ask if direction == "long" else tick.bid
+
+        # sl/tp arrive as absolute prices computed by the strategy against
+        # the signal bar's CLOSE, not the live price — normally close enough
+        # to not matter, but with a tight tp_r_multiple the TP distance can
+        # be small enough (single-digit pips on some pairs) that ordinary
+        # execution latency during a fast move eats the whole gap, leaving
+        # the live price already past the stale TP by the time the order
+        # actually sends: MT5 then rejects the whole order as "Invalid
+        # stops" and the signal is lost outright. Re-anchoring to the live
+        # price — same R-distance, just measured from where price actually
+        # is now instead of where it was a few hundred ms ago — keeps SL/TP
+        # correctly positioned relative to `price` regardless of how far
+        # price moved between signal and execution.
+        if signal_entry_price is not None and signal_entry_price > 0:
+            sl_distance = abs(signal_entry_price - sl)
+            tp_distance = abs(tp - signal_entry_price)
+            if direction == "long":
+                sl = price - sl_distance
+                tp = price + tp_distance
+            else:
+                sl = price + sl_distance
+                tp = price - tp_distance
 
         # Round SL/TP to symbol's price precision
         digits = info.digits

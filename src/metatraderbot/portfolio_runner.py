@@ -48,6 +48,19 @@ STRATEGY_CLASSES: dict[str, Type] = {
 WARMUP_BARS = 300
 
 
+def _currencies(symbol: str) -> tuple[str, ...]:
+    """Best-effort currency codes touched by a symbol, for cross-slot
+    correlated-exposure tracking. A 6-letter alphabetic symbol (EURUSD,
+    GBPJPY, XAUUSD — gold genuinely shares USD exposure with other USD
+    pairs the same way two JPY pairs share JPY exposure) splits into
+    base+quote; anything else (US30, DE40 — index symbols with digits in
+    the name) is its own standalone bucket since it doesn't share currency
+    exposure with FX pairs."""
+    if len(symbol) == 6 and symbol.isalpha():
+        return (symbol[:3], symbol[3:])
+    return (symbol,)
+
+
 @dataclass
 class TrackedPosition:
     entry: float
@@ -108,6 +121,15 @@ class PortfolioRunner:
         # waiting for a (possibly much smaller) fixed TP or letting it
         # round-trip back down. 0 (default) disables it.
         self.skyrocket_multiple = float(cap.get("skyrocket_multiple", 0.0))
+        # Cap on how much risk_usd can be exposed to any single currency at
+        # once, summed across EVERY slot's open positions — not just the
+        # current one. max_positions_per_config only limits one slot at a
+        # time; it does nothing to stop five different slots (different
+        # strategies, different timeframes) from all independently holding
+        # JPY or USD exposure simultaneously, which is exactly what a single
+        # broad currency move (seen live more than once) hits all at once.
+        # In R-multiples of risk_usd_per_trade; 0 (default) disables it.
+        self.max_currency_exposure_r = float(cap.get("max_currency_exposure_r", 0.0))
 
         self.poll_interval_s = int(
             portfolio_cfg.get("mt5", {}).get("poll_interval_s", 5)
@@ -321,7 +343,29 @@ class PortfolioRunner:
 
         return raw
 
+    def _currency_exposure_r(self, currency: str) -> float:
+        """Risk currently committed to `currency`, in R-multiples of
+        risk_usd_per_trade, summed across EVERY slot's open positions —
+        not just one. Approximates each open position's risk as one R
+        (risk_usd_per_trade) regardless of exactly how far price has moved
+        since entry; precise enough for a portfolio-level exposure cap."""
+        total_r = 0.0
+        for slot in self.slots:
+            if currency not in _currencies(slot.symbol):
+                continue
+            total_r += len(slot.tracked)
+        return total_r
+
     def _execute_trade(self, slot: StrategySlot, trade: TradeSpec, bar_index: int) -> None:
+        if self.max_currency_exposure_r > 0:
+            for currency in _currencies(slot.symbol):
+                if self._currency_exposure_r(currency) + 1 > self.max_currency_exposure_r:
+                    log.info(
+                        f"[{slot.name}] signal skipped — {currency} exposure already at/above "
+                        f"{self.max_currency_exposure_r}R across the portfolio"
+                    )
+                    return
+
         lots = round(max(0.01, trade.lots), 2)
         direction = trade.direction.value
 
@@ -350,6 +394,7 @@ class PortfolioRunner:
             tp=trade.take_profit,
             magic=slot.magic,
             comment=slot.name,
+            signal_entry_price=trade.entry_price,
         )
 
         self.ledger.log_order(
