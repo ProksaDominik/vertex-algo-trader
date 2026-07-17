@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 import MetaTrader5 as mt5  # noqa: E402
-from metatraderbot.mt5_engine import TIMEFRAME_MAP  # noqa: E402
+from metatraderbot.mt5_engine import TIMEFRAME_MAP, MT5Engine  # noqa: E402
 
 PORT = 8765
 
@@ -110,10 +110,21 @@ class Handler(BaseHTTPRequestHandler):
                 if bars:
                     on_or_before = [b["time"] for b in bars if b["time"] <= opened_time]
                     entry_bar_time = on_or_before[-1] if on_or_before else bars[0]["time"]
+                # True-UTC version of opened_time, for the dashboard's "open
+                # for" duration display. opened_time itself stays in broker
+                # clock (needed as-is for entry_bar_time snapping above,
+                # since it has to line up with the bars' own broker-clock
+                # timestamps) — using it directly against the browser's real
+                # clock used to show "0m" for any position younger than one
+                # full bar interval, since a fresh position's opened_time is
+                # almost always at or after the most recently CLOSED bar.
+                offset = MT5Engine().broker_offset_seconds(symbol)
+                opened_time_utc = opened_time - offset
                 position = {
                     "entry": p.price_open, "sl": p.sl, "tp": p.tp,
                     "current": p.price_current, "is_long": p.type == 0,
                     "profit": p.profit, "opened_time": opened_time,
+                    "opened_time_utc": opened_time_utc,
                     "entry_bar_time": entry_bar_time,
                 }
 

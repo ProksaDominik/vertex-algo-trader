@@ -369,7 +369,14 @@ def build_live_chart_html(symbol: str, ticket: int, is_long: bool, default_timef
           pnlEl.innerText = (p.profit >= 0 ? "+$" : "-$") + Math.abs(p.profit).toFixed(2);
         }}
         if (statsEl) {{
-          const openedFor = fmtDuration(lastT - p.opened_time);
+          // Real elapsed time (browser clock, true UTC) against the
+          // API-corrected true-UTC open time — NOT lastT (the last fetched
+          // bar's timestamp), which is up to one whole bar-interval stale
+          // and used to show "0m" for any position younger than that,
+          // since a fresh position's open time is almost always at or
+          // after the most recently closed bar.
+          const nowUtc = Date.now() / 1000;
+          const openedFor = fmtDuration(nowUtc - (p.opened_time_utc ?? p.opened_time));
           statsEl.innerHTML = "Current <b>" + p.current.toFixed({precision}) + "</b> &nbsp; open " + openedFor;
         }}
       }} else if (hadPosition) {{
