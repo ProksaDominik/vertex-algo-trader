@@ -41,7 +41,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   #    +$455 est 30d, -$840 DD, 13.78 expect/trade.
   - name: xauusd_nowick_30m_3r
     symbol: XAUUSD
@@ -58,7 +58,7 @@ configs:
         retrace_bars: 5
       exit:
         sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   #    +$400 est 30d, -$836 DD, 13.64 expect/trade.
   - name: nzdusd_macd_30m_3r
     symbol: NZDUSD
@@ -73,7 +73,7 @@ configs:
         require_zero_side: true
       exit:
         sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   #    +$58 est 30d.
   - name: usdchf_donchian_30m_3r
     symbol: USDCHF
@@ -84,7 +84,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
 
   # --- Market-expansion additions (2026-07-15) — backtested across 26 new
   # candidate symbols; only combos with expectancy > $10/trade deployed.
@@ -106,7 +106,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: eurjpy_donchian_30m_3r
     symbol: EURJPY
     strategy: DonchianBreakout
@@ -116,7 +116,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: eurchf_donchian_30m_3r
     symbol: EURCHF
     strategy: DonchianBreakout
@@ -126,7 +126,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: gbpjpy_macd_30m_3r
     symbol: GBPJPY
     strategy: MACDTrend
@@ -140,7 +140,7 @@ configs:
         require_zero_side: true
       exit:
         sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: nzdjpy_donchian_30m_3r
     symbol: NZDJPY
     strategy: DonchianBreakout
@@ -150,7 +150,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: audjpy_donchian_30m_3r
     symbol: AUDJPY
     strategy: DonchianBreakout
@@ -160,7 +160,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: chfjpy_donchian_30m_3r
     symbol: CHFJPY
     strategy: DonchianBreakout
@@ -170,7 +170,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: us30_donchian_30m_3r
     symbol: US30
     strategy: DonchianBreakout
@@ -180,7 +180,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   #     hedging-mode account confirmed, independent magic numbers, no conflict).
   - name: gbpjpy_donchian_30m_3r
     symbol: GBPJPY
@@ -191,7 +191,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: euraud_donchian_30m_3r
     symbol: EURAUD
     strategy: DonchianBreakout
@@ -201,7 +201,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: audchf_donchian_30m_3r
     symbol: AUDCHF
     strategy: DonchianBreakout
@@ -211,7 +211,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: audcad_donchian_30m_3r
     symbol: AUDCAD
     strategy: DonchianBreakout
@@ -221,7 +221,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: nzdjpy_macd_30m_3r
     symbol: NZDJPY
     strategy: MACDTrend
@@ -235,7 +235,7 @@ configs:
         require_zero_side: true
       exit:
         sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: gbpchf_macd_30m_3r
     symbol: GBPCHF
     strategy: MACDTrend
@@ -249,7 +249,7 @@ configs:
         require_zero_side: true
       exit:
         sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
   - name: de40_macd_30m_3r
     symbol: DE40
     strategy: MACDTrend
@@ -263,7 +263,7 @@ configs:
         require_zero_side: true
       exit:
         sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 2.0  # widened from 0.333 (2026-07-17 sweep): every metric — P&L, expectancy, drawdown — improved monotonically with a bigger target. FTMO doesn't need daily frequency, needs to protect its drawdown budget to pass the challenge, so this leans hard into that tradeoff.
 
 mt5:
   symbol_map: {}

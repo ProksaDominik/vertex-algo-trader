@@ -58,7 +58,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
 
   # 2. USDJPY — 69.1% WR, 3.52 trades/day (highest frequency).
   - name: yolo_usdjpy_donchian_15m_05r
@@ -70,7 +70,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
 
   # 3. GBPUSD — Donchian at 0.5R (untested at this TP but pattern is consistent).
   - name: yolo_gbpusd_donchian_30m_05r
@@ -82,7 +82,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
 
   # 4. AUDUSD — commodity-currency diversifier.
   - name: yolo_audusd_donchian_30m_05r
@@ -94,7 +94,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
 
   # 5. NZDUSD — pair diversifier (kiwi tends to move different from USD majors).
   - name: yolo_nzdusd_donchian_30m_05r
@@ -106,7 +106,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
 
   # 6. USDCHF — Swiss safe-haven, low-vol diversifier.
   - name: yolo_usdchf_donchian_30m_05r
@@ -118,7 +118,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
 
   # --- Market-expansion additions (2026-07-15) — same 26-symbol sweep as
   # FTMO. tp_r_multiple below is now PER-SLOT (2026-07-15 per-slot ratio
@@ -136,7 +136,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_eurjpy_donchian_30m_3r
     symbol: EURJPY
     strategy: DonchianBreakout
@@ -146,7 +146,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_eurchf_donchian_30m_3r
     symbol: EURCHF
     strategy: DonchianBreakout
@@ -156,7 +156,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_gbpjpy_macd_30m_3r
     symbol: GBPJPY
     strategy: MACDTrend
@@ -170,7 +170,7 @@ configs:
         require_zero_side: true
       exit:
         sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_nzdjpy_donchian_30m_3r
     symbol: NZDJPY
     strategy: DonchianBreakout
@@ -180,7 +180,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_audjpy_donchian_30m_3r
     symbol: AUDJPY
     strategy: DonchianBreakout
@@ -190,7 +190,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_chfjpy_donchian_30m_3r
     symbol: CHFJPY
     strategy: DonchianBreakout
@@ -200,7 +200,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_us30_donchian_30m_3r
     symbol: US30
     strategy: DonchianBreakout
@@ -210,7 +210,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   #     hedging-mode account confirmed, independent magic numbers, no conflict).
   - name: yolo_gbpjpy_donchian_30m_3r
     symbol: GBPJPY
@@ -221,7 +221,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_euraud_donchian_30m_3r
     symbol: EURAUD
     strategy: DonchianBreakout
@@ -231,7 +231,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_audchf_donchian_30m_3r
     symbol: AUDCHF
     strategy: DonchianBreakout
@@ -241,7 +241,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_audcad_donchian_30m_3r
     symbol: AUDCAD
     strategy: DonchianBreakout
@@ -251,7 +251,7 @@ configs:
       donchian:
         period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
       exit:
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_nzdjpy_macd_30m_3r
     symbol: NZDJPY
     strategy: MACDTrend
@@ -265,7 +265,7 @@ configs:
         require_zero_side: true
       exit:
         sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_gbpchf_macd_30m_3r
     symbol: GBPCHF
     strategy: MACDTrend
@@ -279,7 +279,7 @@ configs:
         require_zero_side: true
       exit:
         sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
   - name: yolo_de40_macd_30m_3r
     symbol: DE40
     strategy: MACDTrend
@@ -293,7 +293,7 @@ configs:
         require_zero_side: true
       exit:
         sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.333  # TP closer than SL (1:3 SL:TP) per explicit request
+        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
 
 mt5:
   symbol_map: {}
