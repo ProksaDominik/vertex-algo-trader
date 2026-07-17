@@ -27,6 +27,7 @@ from metatraderbot.strategies_bollinger import BollingerBounceStrategy
 from metatraderbot.strategies_donchian import DonchianBreakoutStrategy
 from metatraderbot.strategies_ma_cross import SMACrossStrategy
 from metatraderbot.strategies_macd import MACDTrendStrategy
+from metatraderbot.strategies_orb import ORBStrategy
 from metatraderbot.strategies_rsi import RSIReversionStrategy
 from metatraderbot.strategies_stochastic import StochasticStrategy
 from metatraderbot.strategy import NoWickStrategy, TradeSpec
@@ -41,6 +42,7 @@ STRATEGY_CLASSES: dict[str, Type] = {
     "RSIReversion": RSIReversionStrategy,
     "SMACross": SMACrossStrategy,
     "Stochastic": StochasticStrategy,
+    "ORB": ORBStrategy,
 }
 
 WARMUP_BARS = 300
@@ -172,6 +174,7 @@ class PortfolioRunner:
                 "session": params.get("session"),
                 "bollinger": params.get("bollinger", {}),
                 "donchian": params.get("donchian", {}),
+                "orb": params.get("orb", {}),
             },
         }
         s = cfg["strategy"]

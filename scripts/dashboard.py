@@ -1028,7 +1028,15 @@ def render_closed_positions() -> None:
     already used elsewhere in this file — keeps this section's own refresh
     timer independent of the others."""
     _signals, _orders, closed, _heartbeats = load_ledger(ledger_path)
-    realized_pnl = float(closed["pnl_usd"].sum()) if len(closed) else 0.0
+    if len(closed):
+        # Slovakia-local calendar date per trade — everything else in this
+        # table is already shown in SK time, so the day filter needs to
+        # bucket by the same clock or a trade near midnight could land in
+        # the "wrong" day relative to what's displayed.
+        closed = closed.copy()
+        closed["_closed_date_sk"] = pd.to_datetime(closed["closed_ts"], format="ISO8601").apply(
+            lambda d: to_slovakia(d).date()
+        )
 
     with st.container(border=True):
         # --- Closed positions, one clear card per trade — realized_pnl above is
@@ -1038,10 +1046,22 @@ def render_closed_positions() -> None:
         if not len(closed):
             st.info("No closed positions yet.")
         else:
-            n_win = int((closed["pnl_usd"] > 0).sum())
-            n_loss = int((closed["pnl_usd"] <= 0).sum())
+            available_days = sorted(closed["_closed_date_sk"].unique(), reverse=True)
+            day_counts = closed["_closed_date_sk"].value_counts()
+            day_options = ["All days"] + [
+                f"{d.strftime('%Y-%m-%d (%a)')} — {day_counts[d]} trades" for d in available_days
+            ]
+            day_key_map = dict(zip(day_options[1:], available_days))
+            selected_label = st.selectbox("Filter by day", day_options, key="closed_day_filter_select")
+            selected_day = day_key_map.get(selected_label)  # None means "All days"
+            display_closed = closed if selected_day is None else closed[closed["_closed_date_sk"] == selected_day]
+
+            realized_pnl = float(display_closed["pnl_usd"].sum())
+            n_win = int((display_closed["pnl_usd"] > 0).sum())
+            n_loss = int((display_closed["pnl_usd"] <= 0).sum())
+            day_suffix = "" if selected_day is None else f" on {selected_day.strftime('%Y-%m-%d')}"
             st.markdown(
-                f"<small style='opacity:0.75'>{len(closed)} closed &nbsp;|&nbsp; "
+                f"<small style='opacity:0.75'>{len(display_closed)} closed{day_suffix} &nbsp;|&nbsp; "
                 f"{_dot('#4c6ef5')}{n_win} wins &nbsp;|&nbsp; {_dot('#f5426c')}{n_loss} losses &nbsp;|&nbsp; "
                 f"Realized total: <b>${realized_pnl:+,.2f}</b></small>",
                 unsafe_allow_html=True,
@@ -1052,7 +1072,7 @@ def render_closed_positions() -> None:
             for col, label in zip(hdr, ["Strategy", "Symbol", "Dir", "Entry → Exit", "P&L", "Opened (SK)", "Closed (SK)", "Duration", ""]):
                 col.markdown(f"**{label}**")
 
-            for _, row in closed.sort_values("closed_ts", ascending=False).iterrows():
+            for _, row in display_closed.sort_values("closed_ts", ascending=False).iterrows():
                 cols = st.columns(col_widths)
                 cols[0].markdown(
                     strategy_cell_html(strat_by_name.get(row["config_name"], ""), row["config_name"], show_explain=False),
