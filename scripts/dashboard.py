@@ -1111,14 +1111,14 @@ def render_closed_positions() -> None:
                     opened_broker_ts = int(opened_dt.timestamp()) + offset
                     closed_broker_ts = int(closed_dt.timestamp()) + offset
                     duration_s = max(closed_broker_ts - opened_broker_ts, 60)
-                    # Just the trade itself, plus a couple of minutes on each
-                    # side to render the entry/exit bars cleanly — no
-                    # surrounding market context. Context padding made the
-                    # y-axis stretch to cover whatever happened before/after
-                    # the trade too, squashing the trade's own move down to
-                    # an unreadable sliver.
+                    # Just the trade itself, plus a little room on each side
+                    # to render the entry/exit bars cleanly and show what
+                    # happened right after — no full surrounding context.
+                    # Context padding made the y-axis stretch to cover
+                    # whatever happened before/after the trade too, squashing
+                    # the trade's own move down to an unreadable sliver.
                     pre_padding_s = 120
-                    post_padding_s = 120
+                    post_padding_s = 600
                     st.session_state["review_trade"] = {
                         "symbol": row["symbol"], "is_long": is_long,
                         "entry": float(row["entry_price"]), "sl": float(row["sl"]), "tp": float(row["tp"]),
