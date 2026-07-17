@@ -21,16 +21,17 @@ capital:
   # $30/trade = 15% of $200. Extremely aggressive.
   risk_usd_per_trade: 30
 
-  # Ratchet trailing stop, ENABLED (this supersedes the earlier "no
-  # breakeven, let it ride" choice — trades were sitting open a long time
-  # even in solid profit, per explicit follow-up request to close more often
-  # and take profit more often). Once profit reaches 0.15R, lock in 50% of
-  # whatever profit has been reached so far by moving SL forward, re-checked
-  # every tick so it keeps tightening as price advances further and never
-  # loosens. start_r lowered from 0.5 to 0.15 now that TP itself is only
-  # 0.333R away (see tp_r_multiple below) — 0.5 would never fire since TP
-  # would already be hit first.
-  trail_start_r: 0.15
+  # Ratchet trailing stop DISABLED (2026-07-17): it was tuned (0.15R start)
+  # for the old 0.333R TP, where a trade had little room to run anyway. Now
+  # that tp_r_multiple is 0.75 — specifically widened because the backtest
+  # showed bigger targets meaningfully improve P&L — a 0.15R ratchet closes
+  # trades on the first small pullback long before they get anywhere near
+  # that target, which directly defeats the point of widening it. The
+  # wider-TP result itself was measured WITHOUT a ratchet in the backtest,
+  # so running both together live was never actually validated, and it
+  # visibly wasn't working right (trades closing at a couple dollars of
+  # profit with TP several times further away). 0 disables it.
+  trail_start_r: 0.0
   trail_lock_fraction: 0.5
 
   # Close early (at market) when the current candle's range is >= 2.5x the
