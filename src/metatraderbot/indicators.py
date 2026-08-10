@@ -44,6 +44,45 @@ def swing_low(lows: pd.Series, lookback: int) -> float:
     return float(lows.tail(lookback).min())
 
 
+def is_bullish_pinbar(row: pd.Series, wick_min_pct: float = 0.5, body_max_pct: float = 0.35) -> bool:
+    """Long lower wick + small body near the top — rejection of lower prices."""
+    rng = row["high"] - row["low"]
+    if rng <= 0:
+        return False
+    body = abs(row["close"] - row["open"])
+    lower_wick = min(row["open"], row["close"]) - row["low"]
+    return (lower_wick / rng) >= wick_min_pct and (body / rng) <= body_max_pct
+
+
+def is_bearish_pinbar(row: pd.Series, wick_min_pct: float = 0.5, body_max_pct: float = 0.35) -> bool:
+    """Long upper wick + small body near the bottom — rejection of higher
+    prices (a "shooting star" is a bearish pinbar by this same definition)."""
+    rng = row["high"] - row["low"]
+    if rng <= 0:
+        return False
+    body = abs(row["close"] - row["open"])
+    upper_wick = row["high"] - max(row["open"], row["close"])
+    return (upper_wick / rng) >= wick_min_pct and (body / rng) <= body_max_pct
+
+
+def is_bullish_engulfing(prev: pd.Series, cur: pd.Series) -> bool:
+    return (
+        prev["close"] < prev["open"]
+        and cur["close"] > cur["open"]
+        and cur["close"] >= prev["open"]
+        and cur["open"] <= prev["close"]
+    )
+
+
+def is_bearish_engulfing(prev: pd.Series, cur: pd.Series) -> bool:
+    return (
+        prev["close"] > prev["open"]
+        and cur["close"] < cur["open"]
+        and cur["close"] <= prev["open"]
+        and cur["open"] >= prev["close"]
+    )
+
+
 def atr(bars: pd.DataFrame, period: int) -> pd.Series:
     """Average True Range — used as a volatility yardstick for "how decisive
     is this move" signal-quality filters (a breakout that only just pokes

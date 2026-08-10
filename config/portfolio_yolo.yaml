@@ -1,312 +1,221 @@
-# YOLO Portfolio — aggressive personal $200 account, NETTING-mode compatible.
+# YOLO $200 portfolio -- rebuilt 2026-08-05.
 #
-# One config per pair (netting rule). 6 pairs = 6 concurrent signal streams
-# = ~7-10 trades/day realistically.
+# TWO UNCORRELATED STREAMS. No deadline and no drawdown rules here, so unlike
+# the FTMO book this one is scored on GROWTH and keeps the WIDE targets that
+# maximise expectancy rather than the tight ones that win races.
 #
-# tp_r_multiple is now PER-SLOT, not one blanket ratio — chosen by a sweep
-# (2026-07-15) that tried candidates from 0.2 to 5.0 against each slot's own
-# trade history and kept whichever ratio gave the best net expectancy. Every
-# slot here is a low-win-rate breakout/trend strategy (20-33% WR is normal
-# for Donchian/MACD) — that shape needs a LARGE reward:risk to be net
-# profitable, which is why the sweep converged on wide TPs (3-5x the SL
-# distance) for every slot. A ratchet trailing stop (below) now handles
-# closing trades sooner on a pullback instead of a tight fixed TP.
-# Skyrocket-exit (below) applies on top: an outsized favorable candle closes
-# the trade early rather than waiting for the full TP target.
+#   1. FX MEAN-REVERSION @4R -- RSI(14) + Bollinger(20,2.0) on 17 pairs.
+#      OOS +0.385R and +0.153R, both halves positive.
+#   2. NON-FX TREND @6R -- Donchian(20) on indices/commodities/crypto.
+#      +0.219R train / +0.340R OOS: the most robust single result in this
+#      project, 5x RSI's train half, and it does NOT lean on the post-2021
+#      regime the FX edge depends on (scripts/nonfx_trend_test.py).
 #
-# NO KILL SWITCH by design — this is aggressive mode. If the account goes to zero,
-# that's what you signed up for by picking YOLO over FTMO.
+# The streams are essentially UNCORRELATED (+0.047 daily). Blending cut
+# portfolio volatility 35% (sigma 2.61 -> 1.69) while RAISING mu/sigma above
+# either stream alone -- the only time in this project that cutting variance
+# did not cut drift with it, because these bets are genuinely independent (the
+# 17-pair FX basket is worth only ~4.9).
+#
+# That diversification did NOT help the FTMO book (two-stream 38.1%/42.3% vs
+# FX-only 39.1%/42.9%, scripts/two_stream_race.py): a deadline rewards speed
+# over smoothness. Here, where compounding runs indefinitely, it is exactly
+# what you want.
+#
+# ADAPTIVE LAYER DISABLED -- measured harmful, it benched the BEST trades
+# (scripts/learner_value_test.py: kept +0.052R vs benched +0.309R).
+#
+# COST WARNING: PAIR_SPECS spreads for the non-FX instruments are ESTIMATES
+# (several returned zero ticks when queried live). Costs are the binding
+# constraint in this project, so the Donchian numbers are PROVISIONAL until
+# verified against real fills. BRENT/COPPER excluded -- profitable in
+# backtest but this broker does not offer them.
+#
+# SIZING: 15% risk, 10 concurrent -- the most profitable AND most aggressive
+# setting measured (scripts/yolo_roster_compare.py), median month +5.66%.
+#
+# THREE legs, not more. Adding RSI(7)+Boll(40) doubles trades/day (1.09 ->
+# 2.34) but CUTS the median month from +5.66% to +1.03%; a 7-leg roster turns
+# it NEGATIVE (-4.19%). RSI(14) earns +0.463R OOS while RSI(7) earns +0.151R,
+# so extra legs buy frequency by diluting quality. Concentration wins here.
+#
+# P(ruin) is 9.2% at this sizing. That is the price of the aggression and it
+# is deliberate on a paper book; drop to 10% risk for 3.6% ruin and a +3.77%
+# median month.
+#
+# CURRENCY CAP REMOVED (max_currency_exposure_r: 0), deliberately.
+#
+# The cap exists because the 17-pair FX basket is only ~4.9 independent bets:
+# on 2026-07-15 seventeen live positions decomposed to roughly ONE bet (long
+# CHF / short JPY) and returned +$374; six days later the same structure
+# returned -$832. That episode is why the cap was added.
+#
+# Measured over 10.5y, however, concentration WINS on this book
+# (scripts scratchpad capcmp, $200 / 15% risk / 10 concurrent):
+#
+#   cap    med wk   med month   P(+$150 wk)   P(ruin)   maxDD
+#     2    -0.43%     +5.66%        6.0%        9.2%    23.4%
+#     1    -0.34%     +2.88%        0.9%        2.8%    16.6%
+#  none    +4.76%    +20.29%       14.2%       16.7%    32.8%
+#
+# Removing it nearly QUADRUPLES the median month and turns the median week
+# positive. The reason: correlated positions amplify both directions, and
+# this book has positive expectancy, so amplifying it gains more than the
+# extra ruin risk costs -- the single-sample intuition from July was wrong.
+#
+# The price is real and accepted: ruin 9.2% -> 16.7%, max drawdown
+# 23.4% -> 32.8%. On a $200 PAPER book that is an information cost, not a
+# financial one. Do NOT copy this setting to the FTMO book, where a 10%
+# drawdown ends the account outright.
+#
+# COST GATE RAISED 0.04 -> 0.10.
+#
+# At 0.04 the live book rejected 4 of its 6 signals in four days
+# (AUDUSD 0.067R and 0.042R, AUDCAD 0.050R, EURCHF 0.075R). That threshold was
+# copied from the FTMO book, where trades are 1R-target confluence entries
+# with tight stops so cost is naturally a small fraction of R. THIS book runs
+# 4-6R targets on wide daily swing stops, where a legitimate trade routinely
+# costs 0.04-0.08R -- the gate was filtering out normal trades, not bad ones.
+#
+# 0.10 still blocks the genuinely uneconomic ones. Keep an eye on it via the
+# nightly review: if real slippage runs at the 2-12x seen in July, the honest
+# response is to trade fewer instruments, not to keep loosening this.
+#
+# Paper/demo only (MetaQuotes-Demo).
 
 capital:
-  # $30/trade = 15% of $200. Extremely aggressive.
+  risk_mode: percent_equity
+  risk_pct: 15.0
+  account_size_usd: 200
   risk_usd_per_trade: 30
-
-  # Ratchet trailing stop DISABLED (2026-07-17): it was tuned (0.15R start)
-  # for the old 0.333R TP, where a trade had little room to run anyway. Now
-  # that tp_r_multiple is 0.75 — specifically widened because the backtest
-  # showed bigger targets meaningfully improve P&L — a 0.15R ratchet closes
-  # trades on the first small pullback long before they get anywhere near
-  # that target, which directly defeats the point of widening it. The
-  # wider-TP result itself was measured WITHOUT a ratchet in the backtest,
-  # so running both together live was never actually validated, and it
-  # visibly wasn't working right (trades closing at a couple dollars of
-  # profit with TP several times further away). 0 disables it.
   trail_start_r: 0.0
-  trail_lock_fraction: 0.5
-
-  # Close early (at market) when the current candle's range is >= 2.5x the
-  # recent (20-bar) average range, moving favorably, and the trade is in
-  # profit — captures an outsized spike instead of waiting for the (often
-  # distant) fixed TP or letting a big move round-trip back down before it
-  # triggers.
-  skyrocket_multiple: 2.5
-
-  # Set very deep so kill-switch checks never trip in YOLO mode.
-  daily_stop_loss_usd: -10000
-  max_total_drawdown_usd: -10000
-
-  max_positions_per_config: 5      # raised from 3 so more concurrent trades can fire per slot
-
+  trail_lock_fraction: 0.0
+  daily_stop_loss_usd: -40
+  max_total_drawdown_usd: -120
+  max_positions_per_config: 2
+  max_total_open_risk_r: 10
+  max_concurrent_positions_total: 10
+  max_currency_exposure_r: 0.0
+  max_signal_age_bars: 2
+  min_lot_policy: floor
+  skip_weekdays:
+  - 6
+  max_trades_per_day: 8
+  weekly_stop_pct: 0.0
+  k4_consecutive_loss_halving_enabled: false
+  k4_consecutive_loss_trigger: 4
+  k4_recovery_wins_needed: 2
+  k6_spread_anomaly_enabled: true
+  k6_spread_multiple: 5.0
+  k6_persist_s: 30.0
+  k8_slippage_recalibration_enabled: true
+  k8_window_trades: 20
+  k8_slippage_multiple: 2.0
+  k9_ntp_drift_enabled: true
+  k9_max_drift_s: 5.0
+  k9_check_interval_s: 300.0
+  k10_lot_anomaly_enabled: true
+  k10_window_trades: 20
+  k10_lot_multiple: 3.0
+  cost_gate_enabled: true
+  cost_gate_r: 0.1
+  slot_health:
+    enabled: false
+    window_trades: 12
+    quarantine_below_net_r: -8.0
+    cooldown_hours: 12
+  learning:
+    enabled: false
+    session_min_trades: 6
+    session_avoid_below_net_r: -3.0
+  auto_retune:
+    enabled: true
+    step_pct: 0.2
+    floor_frac: 0.3
+    max_retunes: 5
+  circuit_breaker:
+    enabled: true
+    halt_drawdown_pct: 40
+  partial_take:
+    enabled: false
+  pyramid:
+    enabled: false
 configs:
-  # 1. XAUUSD — 78.4% WR (highest in whole sweep), 2.55 trades/day.
-  #    Tightest TP for the win-rate feel.
-  - name: yolo_xauusd_donchian_30m_03r
-    symbol: XAUUSD
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3001
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-
-  # 2. USDJPY — 69.1% WR, 3.52 trades/day (highest frequency).
-  - name: yolo_usdjpy_donchian_15m_05r
-    symbol: USDJPY
-    strategy: DonchianBreakout
-    timeframe: 15m
-    magic_number: 3002
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-
-  # 3. GBPUSD — Donchian at 0.5R (untested at this TP but pattern is consistent).
-  - name: yolo_gbpusd_donchian_30m_05r
-    symbol: GBPUSD
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3003
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-
-  # 4. AUDUSD — commodity-currency diversifier.
-  - name: yolo_audusd_donchian_30m_05r
-    symbol: AUDUSD
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3004
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-
-  # 5. NZDUSD — pair diversifier (kiwi tends to move different from USD majors).
-  - name: yolo_nzdusd_donchian_30m_05r
-    symbol: NZDUSD
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3005
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-
-  # 6. USDCHF — Swiss safe-haven, low-vol diversifier.
-  - name: yolo_usdchf_donchian_30m_05r
-    symbol: USDCHF
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3006
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-
-  # --- Market-expansion additions (2026-07-15) — same 26-symbol sweep as
-  # FTMO. tp_r_multiple below is now PER-SLOT (2026-07-15 per-slot ratio
-  # sweep — candidates [0.2 .. 5.0] tested per slot, kept whichever gave the
-  # best net expectancy for THAT slot's own trade history). Skyrocket-exit
-  # and disabled breakeven-lock above apply to these too, same as the rest. ---
-
-  # 7. GBPCHF Donchian — best in the whole expansion sweep, +$51.58/trade.
-  - name: yolo_gbpchf_donchian_30m_3r
-    symbol: GBPCHF
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3007
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_eurjpy_donchian_30m_3r
-    symbol: EURJPY
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3008
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_eurchf_donchian_30m_3r
-    symbol: EURCHF
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3009
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_gbpjpy_macd_30m_3r
-    symbol: GBPJPY
-    strategy: MACDTrend
-    timeframe: 30m
-    magic_number: 3010
-    strategy_params:
-      macd:
-        fast_period: 12
-        slow_period: 26
-        signal_period: 9
-        require_zero_side: true
-      exit:
-        sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_nzdjpy_donchian_30m_3r
-    symbol: NZDJPY
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3011
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_audjpy_donchian_30m_3r
-    symbol: AUDJPY
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3012
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_chfjpy_donchian_30m_3r
-    symbol: CHFJPY
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3013
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_us30_donchian_30m_3r
-    symbol: US30
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3014
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  #     hedging-mode account confirmed, independent magic numbers, no conflict).
-  - name: yolo_gbpjpy_donchian_30m_3r
-    symbol: GBPJPY
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3015
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_euraud_donchian_30m_3r
-    symbol: EURAUD
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3016
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_audchf_donchian_30m_3r
-    symbol: AUDCHF
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3017
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_audcad_donchian_30m_3r
-    symbol: AUDCAD
-    strategy: DonchianBreakout
-    timeframe: 30m
-    magic_number: 3018
-    strategy_params:
-      donchian:
-        period: 10  # tightened from 20 so SL/TP sit closer to entry, per explicit request
-      exit:
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_nzdjpy_macd_30m_3r
-    symbol: NZDJPY
-    strategy: MACDTrend
-    timeframe: 30m
-    magic_number: 3019
-    strategy_params:
-      macd:
-        fast_period: 12
-        slow_period: 26
-        signal_period: 9
-        require_zero_side: true
-      exit:
-        sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_gbpchf_macd_30m_3r
-    symbol: GBPCHF
-    strategy: MACDTrend
-    timeframe: 30m
-    magic_number: 3020
-    strategy_params:
-      macd:
-        fast_period: 12
-        slow_period: 26
-        signal_period: 9
-        require_zero_side: true
-      exit:
-        sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-  - name: yolo_de40_macd_30m_3r
-    symbol: DE40
-    strategy: MACDTrend
-    timeframe: 30m
-    magic_number: 3021
-    strategy_params:
-      macd:
-        fast_period: 12
-        slow_period: 26
-        signal_period: 9
-        require_zero_side: true
-      exit:
-        sl_swing_lookback: 5  # tightened from 10 so SL/TP sit closer to entry, per explicit request
-        tp_r_multiple: 0.75  # widened from 0.333 (2026-07-17 sweep): calibrated to land near ~13 trades/day (your stated target) while still capturing a real chunk of the P&L improvement a wider target showed in backtest.
-
+- name: RSI_Daily
+  strategy: RSIReversion
+  timeframe: 1d
+  magic_base: 7100
+  symbols: &id001
+  - EURUSD
+  - GBPUSD
+  - USDJPY
+  - AUDUSD
+  - USDCAD
+  - USDCHF
+  - NZDUSD
+  - EURJPY
+  - GBPJPY
+  - NZDJPY
+  - AUDJPY
+  - CHFJPY
+  - GBPCHF
+  - EURCHF
+  - AUDCHF
+  - EURAUD
+  - AUDCAD
+  strategy_params:
+    rsi:
+      period: 14
+      oversold: 30
+      overbought: 70
+    exit:
+      tp_r_multiple: 4.0
+      sl_swing_lookback: 10
+      trail_start_r: 0.0
+- name: Bollinger_Daily
+  strategy: BollingerBounce
+  timeframe: 1d
+  magic_base: 7300
+  symbols: *id001
+  strategy_params:
+    bollinger:
+      period: 20
+      std_dev: 2.0
+    exit:
+      tp_r_multiple: 4.0
+      sl_swing_lookback: 10
+      trail_start_r: 0.0
+- name: Donchian_Trend
+  strategy: DonchianBreakout
+  timeframe: 1d
+  magic_base: 7900
+  symbols:
+  - US30
+  - NAS100
+  - DE40
+  - JP225
+  - WTI
+  - XPTUSD
+  - BTCUSD
+  - ETHUSD
+  - XAUUSD
+  - US500
+  strategy_params:
+    donchian:
+      period: 20
+    exit:
+      tp_r_multiple: 6.0
+      sl_swing_lookback: 10
+      trail_start_r: 0.0
+watchdog:
+  enabled: true
+  stale_tick_s: 300
 mt5:
-  symbol_map: {}
+  symbol_map:
+    NAS100: USTEC
+    JP225: JPN225
+    BTCUSD: BTC
+    ETHUSD: ETH
   poll_interval_s: 5
-
 ledger:
   path: data/paper_ledger_yolo.sqlite
-
-# --- Realistic outcome distribution on $200 at $30/trade risk ---
-# Trades/day (sum):     ~7-10
-# Weighted WR:          ~60-70%
-# Expected weekly P&L:  -$100 to +$400 range (median +$25)
-# Best-case week:       ~+$800 (lucky Donchian streak)
-# Worst-case week:      -$200+ (account gone)
-# Chance of blowup:     ~65% within 8 weeks

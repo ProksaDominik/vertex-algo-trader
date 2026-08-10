@@ -61,6 +61,11 @@ class TradeSpec:
 
 
 class NoWickStrategy:
+    # Tells portfolio_runner._restore/_persist_runtime_state which dataclass
+    # `self.pending` holds, so restart-restore can reconstruct it generically
+    # instead of hardcoding one strategy's pending-signal shape.
+    PENDING_CLS = PendingSignal
+
     def __init__(self, config: dict):
         s = config["strategy"]
         self.ema_period = int(s["trend"]["ema_period"])

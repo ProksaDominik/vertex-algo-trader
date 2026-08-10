@@ -18,11 +18,21 @@ if (-not (Get-Process -Name terminal64 -ErrorAction SilentlyContinue)) {
     Start-Sleep -Seconds 25  # give MT5 time to load and auto-login before bots try to attach
 }
 
-if (-not (Test-Running 'portfolio_ftmo')) {
+if (-not (Test-Running 'portfolio_ftmo\.yaml')) {
+    # Anchored to the exact filename ('\.yaml' at the end) -- a plain
+    # 'portfolio_ftmo' substring match would also fire on the 4-day bot's
+    # 'portfolio_ftmo_4day.yaml' below and wrongly skip launching this one.
     Start-Process -FilePath "$dir\.venv\Scripts\python.exe" `
         -ArgumentList 'scripts\run_paper.py --config config\portfolio_ftmo.yaml' `
         -WorkingDirectory $dir -WindowStyle Hidden `
         -RedirectStandardOutput "$dir\logs\stdout_ftmo.log" -RedirectStandardError "$dir\logs\stderr_ftmo.log"
+}
+
+if (-not (Test-Running 'portfolio_ftmo_4day')) {
+    Start-Process -FilePath "$dir\.venv\Scripts\python.exe" `
+        -ArgumentList 'scripts\run_paper.py --config config\portfolio_ftmo_4day.yaml' `
+        -WorkingDirectory $dir -WindowStyle Hidden `
+        -RedirectStandardOutput "$dir\logs\stdout_ftmo4day.log" -RedirectStandardError "$dir\logs\stderr_ftmo4day.log"
 }
 
 if (-not (Test-Running 'portfolio_yolo')) {

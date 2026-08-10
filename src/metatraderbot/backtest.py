@@ -32,6 +32,11 @@ class OpenPosition:
     take_profit: float
     lots: float
     entered_at: pd.Timestamp
+    orig_sl: float = 0.0
+
+    def __post_init__(self):
+        if not self.orig_sl:
+            self.orig_sl = self.stop_loss
 
 
 @dataclass
@@ -70,6 +75,16 @@ class Backtest:
         self.spread_price = float(bt.get("spread_price", specs["spread_price"]))
         self.commission_per_lot = float(bt.get("commission_per_lot", specs["commission_per_lot"]))
 
+        # Live exit-stack modeling (Phase 5): the runner's ratchet trail and
+        # skyrocket exit, approximated at BAR-CLOSE granularity (live
+        # re-evaluates every tick, i.e. trails tighter than this model —
+        # the approximation is conservative for the trail's benefit).
+        # Defaults 0 = off = identical to the legacy fill model, so the
+        # original sweep results stay reproducible.
+        self.trail_start_r = float(cap.get("trail_start_r", 0.0))
+        self.trail_lock_fraction = float(cap.get("trail_lock_fraction", 0.5))
+        self.skyrocket_multiple = float(cap.get("skyrocket_multiple", 0.0))
+
         self.strategy = strategy if strategy is not None else NoWickStrategy(config)
         self.equity = self.initial_capital
         self.equity_curve: list[tuple[pd.Timestamp, float]] = []
@@ -88,7 +103,7 @@ class Backtest:
         # Round-turn commission + spread (spread hit once on entry).
         return (self.commission_per_lot * lots * 2) + (self.spread_price * lots * self.mult)
 
-    def _check_exits(self, bar: pd.Series, bar_ts: pd.Timestamp):
+    def _check_exits(self, bar: pd.Series, bar_ts: pd.Timestamp, avg_range: float = 0.0):
         still_open = []
         for pos in self.open:
             hit_sl = False
@@ -109,8 +124,39 @@ class Backtest:
             elif hit_tp:
                 exit_price, reason = pos.take_profit, "tp"
             else:
-                still_open.append(pos)
-                continue
+                # Skyrocket exit at bar close (mirrors runner logic).
+                closed_now = False
+                if self.skyrocket_multiple > 0 and avg_range > 0:
+                    rng = float(bar["high"] - bar["low"])
+                    bullish = bar["close"] > bar["open"]
+                    favorable = bullish if pos.direction == Direction.LONG else (not bullish)
+                    move = (bar["close"] - pos.entry_price) if pos.direction == Direction.LONG \
+                        else (pos.entry_price - bar["close"])
+                    if rng >= self.skyrocket_multiple * avg_range and favorable and move > 0:
+                        exit_price, reason = float(bar["close"]), "skyrocket"
+                        closed_now = True
+                if not closed_now:
+                    # Ratchet trail update from this bar's close (mirrors the
+                    # runner: engage at trail_start_r, lock a fraction of the
+                    # reached gain, only ever tighten).
+                    if self.trail_start_r > 0:
+                        r_dist = abs(pos.entry_price - pos.orig_sl)
+                        if r_dist > 0:
+                            profit_dist = (bar["close"] - pos.entry_price) \
+                                if pos.direction == Direction.LONG \
+                                else (pos.entry_price - bar["close"])
+                            profit_r = profit_dist / r_dist
+                            if profit_r >= self.trail_start_r:
+                                lock_r = profit_r * self.trail_lock_fraction
+                                cand = pos.entry_price + lock_r * r_dist \
+                                    if pos.direction == Direction.LONG \
+                                    else pos.entry_price - lock_r * r_dist
+                                improves = cand > pos.stop_loss if pos.direction == Direction.LONG \
+                                    else cand < pos.stop_loss
+                                if improves:
+                                    pos.stop_loss = cand
+                    still_open.append(pos)
+                    continue
 
             pnl = self._raw_pnl(pos, exit_price) - self._costs(pos.lots)
             self.equity += pnl
@@ -157,11 +203,14 @@ class Backtest:
         )
 
     def run(self) -> None:
+        need_range = self.skyrocket_multiple > 0
+        ranges = (self.bars["high"] - self.bars["low"]).rolling(20).mean() if need_range else None
         for i in range(len(self.bars)):
             bar = self.bars.iloc[i]
             bar_ts = pd.Timestamp(bar["timestamp"])
 
-            self._check_exits(bar, bar_ts)
+            avg_range = float(ranges.iloc[i - 1]) if (need_range and i > 0 and pd.notna(ranges.iloc[i - 1])) else 0.0
+            self._check_exits(bar, bar_ts, avg_range)
             new_trades = self.strategy.on_bar(i, self.bars)
             for t in new_trades:
                 self._try_enter(t, bar_ts)

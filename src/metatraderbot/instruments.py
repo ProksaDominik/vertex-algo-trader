@@ -41,6 +41,71 @@ PAIR_SPECS: dict[str, dict[str, float]] = {
         "spread_price": 0.50,        # ~0.5 point
         "commission_per_lot": 3.50,
     },
+
+    # --- NON-FX, added 2026-08-05 -------------------------------------------
+    # Contract multipliers are READ FROM THE LIVE MT5 TERMINAL
+    # (symbol_info.trade_contract_size); spreads are ESTIMATES, since several
+    # symbols returned a zero tick when queried outside their session.
+    #
+    # Treat every result computed with these as PROVISIONAL. Transaction costs
+    # have been the binding constraint in this project all along (SL exits
+    # realise -1.054R not -1.000R, and live fills slipped 2-12x the modelled
+    # spread), so a wrong spread here would manufacture an edge that does not
+    # exist. Verify against real fills before trading any of them.
+    #
+    # Broker ticker differs from the key for several: NAS100 -> "USTEC",
+    # JP225 -> "JPN225", BTCUSD -> "BTC", ETHUSD -> "ETH". Those need
+    # mt5.symbol_map entries in the config.
+    "US30": {
+        "contract_mult": 1.0,
+        "spread_price": 1.20,        # measured live
+        "commission_per_lot": 3.50,
+    },
+    "NAS100": {
+        "contract_mult": 1.0,
+        "spread_price": 1.50,        # ESTIMATE (zero tick when queried)
+        "commission_per_lot": 3.50,
+    },
+    "DE40": {
+        "contract_mult": 1.0,
+        "spread_price": 0.50,        # measured live
+        "commission_per_lot": 3.50,
+    },
+    "JP225": {
+        "contract_mult": 100.0,      # live contract size
+        "spread_price": 8.0,         # ESTIMATE, index points
+        "commission_per_lot": 3.50,
+    },
+    "WTI": {
+        "contract_mult": 1.0,
+        "spread_price": 0.03,        # ESTIMATE, ~3 cents on crude
+        "commission_per_lot": 3.50,
+    },
+    "BRENT": {                        # research only -- broker does NOT offer
+        "contract_mult": 1.0,
+        "spread_price": 0.03,
+        "commission_per_lot": 3.50,
+    },
+    "COPPER": {                       # research only -- broker does NOT offer
+        "contract_mult": 1.0,
+        "spread_price": 0.0015,
+        "commission_per_lot": 3.50,
+    },
+    "XPTUSD": {
+        "contract_mult": 1.0,
+        "spread_price": 2.50,        # ESTIMATE, platinum is wide
+        "commission_per_lot": 3.50,
+    },
+    "BTCUSD": {
+        "contract_mult": 1.0,
+        "spread_price": 25.0,        # ESTIMATE; crypto spreads are very wide
+        "commission_per_lot": 3.50,
+    },
+    "ETHUSD": {
+        "contract_mult": 1.0,
+        "spread_price": 2.00,        # ESTIMATE
+        "commission_per_lot": 3.50,
+    },
     "AUDUSD": {
         "contract_mult": 100_000.0,
         "spread_price": 0.00010,     # ~1.0 pip
@@ -87,8 +152,31 @@ def get_specs(config_or_symbol) -> dict[str, float]:
         symbol = config_or_symbol.get("symbol", "XAUUSD")
     else:
         symbol = str(config_or_symbol)
-    return PAIR_SPECS.get(symbol, PAIR_SPECS["XAUUSD"])
+    specs = PAIR_SPECS.get(symbol)
+    if specs is None:
+        # The old silent fallback to XAUUSD specs (contract_mult=100) would
+        # size an unknown FX pair ~1000x too large (AUDIT C5). Refuse loudly.
+        raise ValueError(
+            f"No contract specs for symbol {symbol!r}. Add it to "
+            f"instruments.PAIR_SPECS (backtests) — live sizing uses broker "
+            f"symbol_info and is unaffected once the symbol exists here."
+        )
+    return specs
 
 
 def contract_mult(config_or_symbol) -> float:
     return get_specs(config_or_symbol)["contract_mult"]
+
+
+def pip_size(symbol: str) -> float:
+    """Standard pip size for strategies that think in pips (SL/TP buffers)
+    rather than raw price distance. JPY pairs and gold quote at a coarser
+    resolution than the other majors; indices use whole points."""
+    s = symbol.upper()
+    if s.endswith("JPY"):
+        return 0.01
+    if s == "XAUUSD":
+        return 0.10
+    if s in ("US30", "DE40", "US500"):
+        return 1.0
+    return 0.0001

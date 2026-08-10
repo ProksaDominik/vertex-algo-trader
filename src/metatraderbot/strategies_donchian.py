@@ -45,6 +45,20 @@ class DonchianBreakoutStrategy:
         self.risk_usd = float(config["capital"]["risk_usd_per_trade"])
         self.contract_mult = contract_mult(config)
 
+        # Stop-placement mode (default preserves the classic Turtle behavior:
+        # SL at the full opposite channel — a deliberately WIDE stop).
+        #   "channel"      : SL = opposite channel edge (original)
+        #   "channel_frac" : SL distance = sl_channel_frac x channel width
+        #   "atr"          : SL distance = sl_atr_mult x ATR(14)
+        # A tighter stop lets the SAME dollar risk buy a bigger position and
+        # brings the (tp_r_multiple x SL) target physically closer — the
+        # trade-off is more shake-outs on noise. Which wins is an empirical
+        # question, answered per-symbol by scripts/geometry_sweep.py.
+        exit_cfg = s.get("exit", {}) or {}
+        self.sl_mode = str(d.get("sl_mode", exit_cfg.get("sl_mode", "channel"))).lower()
+        self.sl_channel_frac = float(d.get("sl_channel_frac", 1.0))
+        self.sl_atr_mult = float(d.get("sl_atr_mult", 1.5))
+
         sess = s.get("session") or {}
         self.session_start_hour = sess.get("start_hour_utc")
         self.session_end_hour = sess.get("end_hour_utc")
@@ -77,11 +91,20 @@ class DonchianBreakoutStrategy:
 
         min_margin = 0.0
         atr_val = None
-        if self.min_breakout_atr_mult > 0 or self.min_momentum_atr_mult > 0:
+        need_atr = (self.min_breakout_atr_mult > 0 or self.min_momentum_atr_mult > 0
+                    or self.sl_mode == "atr")
+        if need_atr:
             atr_val = atr(recent, 14).iloc[-1]
             if pd.isna(atr_val) or atr_val <= 0:
                 return []
             min_margin = self.min_breakout_atr_mult * atr_val
+
+        def _sl_distance(channel_dist: float) -> float:
+            if self.sl_mode == "atr":
+                return self.sl_atr_mult * atr_val
+            if self.sl_mode == "channel_frac":
+                return self.sl_channel_frac * channel_dist
+            return channel_dist  # "channel" — full opposite channel (original)
 
         if self.min_momentum_atr_mult > 0:
             bar_range = float(current["high"] - current["low"])
@@ -95,9 +118,9 @@ class DonchianBreakoutStrategy:
             trend_ok_short = entry < trend
 
         if entry > upper + min_margin and trend_ok_long:
-            sl = lower
-            sl_distance = entry - sl
+            sl_distance = _sl_distance(entry - lower)
             if sl_distance > 0:
+                sl = entry - sl_distance
                 lots = self.risk_usd / (sl_distance * self.contract_mult)
                 if lots > 0:
                     tp = entry + sl_distance * self.tp_r_multiple
@@ -107,9 +130,9 @@ class DonchianBreakoutStrategy:
                         lots=lots, signal_bar_index=bar_index,
                     ))
         elif entry < lower - min_margin and trend_ok_short:
-            sl = upper
-            sl_distance = sl - entry
+            sl_distance = _sl_distance(upper - entry)
             if sl_distance > 0:
+                sl = entry + sl_distance
                 lots = self.risk_usd / (sl_distance * self.contract_mult)
                 if lots > 0:
                     tp = entry - sl_distance * self.tp_r_multiple

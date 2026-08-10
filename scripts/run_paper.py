@@ -32,7 +32,8 @@ load_dotenv(ROOT / ".env")
 
 from metatraderbot.ledger import Ledger  # noqa: E402
 from metatraderbot.mt5_engine import MT5Engine  # noqa: E402
-from metatraderbot.portfolio_runner import PortfolioRunner  # noqa: E402
+from metatraderbot.portfolio_runner import PortfolioRunner, expand_configs  # noqa: E402
+from metatraderbot.state import BotState  # noqa: E402
 
 
 def setup_logging(log_suffix: str) -> None:
@@ -79,15 +80,21 @@ def main() -> int:
     log.info("=" * 60)
     log.info("MetaTraderBot — Phase 2 Paper Trading")
     log.info("=" * 60)
-    log.info(f"Portfolio configs: {len(cfg['configs'])}")
-    for c in cfg["configs"]:
+    # Expand per-strategy entries (symbols:[] + magic_base) into per-symbol
+    # legs for the banner — the config is now one entry per STRATEGY, so the
+    # raw entries no longer carry a single symbol/magic_number (that used to
+    # KeyError here and crash the bot on startup).
+    legs = [c for c in expand_configs(cfg["configs"]) if c.get("enabled", True)]
+    log.info(f"Portfolio: {len(cfg['configs'])} strategies -> {len(legs)} active legs")
+    for c in legs:
         log.info(
-            f"  {c['name']}: {c['symbol']} {c['strategy']} {c['timeframe']} "
-            f"(magic={c['magic_number']})"
+            f"  {c['name']}: {c.get('symbol','?')} {c.get('strategy','?')} "
+            f"{c.get('timeframe','?')} (magic={c.get('magic_number','?')})"
         )
-    log.info(f"Risk per trade: ${cfg['capital']['risk_usd_per_trade']}")
-    log.info(f"Daily stop: ${cfg['capital']['daily_stop_loss_usd']}")
-    log.info(f"Max total DD: ${cfg['capital']['max_total_drawdown_usd']}")
+    cap = cfg.get("capital", {})
+    log.info(f"Risk per trade: ${cap.get('risk_usd_per_trade', '?')}")
+    log.info(f"Daily stop: ${cap.get('daily_stop_loss_usd', '?')}")
+    log.info(f"Max total DD: ${cap.get('max_total_drawdown_usd', '?')}")
     log.info("=" * 60)
 
     ledger_path = ROOT / cfg.get("ledger", {}).get("path", "data/paper_ledger.sqlite")
@@ -99,13 +106,18 @@ def main() -> int:
     control_path = ROOT / "data" / f"control_{log_suffix}.json"
     log.info(f"Control file: {control_path}")
 
+    # Persistent crash-safe state: anchors, halts, pending setups, HWM.
+    state = BotState(ROOT / "data" / f"state_{log_suffix}.json")
+    log.info(f"State file: data/state_{log_suffix}.json")
+
     try:
         engine = MT5Engine(symbol_map=cfg.get("mt5", {}).get("symbol_map", {}))
     except RuntimeError as e:
         log.error(str(e))
         return 3
 
-    runner = PortfolioRunner(cfg, engine, ledger, control_path=control_path)
+    runner = PortfolioRunner(cfg, engine, ledger, control_path=control_path,
+                             state=state, book_name=log_suffix)
     try:
         runner.initialize()
     except Exception as e:

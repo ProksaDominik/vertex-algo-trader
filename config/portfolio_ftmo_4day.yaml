@@ -1,0 +1,167 @@
+# FTMO $10k "4-day" evaluation experiment -- built 2026-08-10.
+#
+# Same RSI(14)+RSI(7) confluence roster as the main FTMO book
+# (config/portfolio_ftmo.yaml), which targets a 10/30-day deadline. This
+# book asks a different question: what is the best achievable config if the
+# deadline is only 4 trading days (FTMO's own minimum)? Tightened stop,
+# higher base risk, adaptive risk taper, and no per-currency cap -- all
+# measured to help specifically at this shorter horizon.
+#
+# EVIDENCE (scratch/ftmo_4day_search.py, ftmo_4day_sltp_sweep.py,
+# ftmo_4day_adaptive_risk.py -- real historical replay, no Monte Carlo,
+# every possible start date over ~10.5 years, all three FTMO rules
+# enforced exactly, MIN_DAYS=4):
+#
+#   AGGRESSIVE symmetric taper, base risk 10%, band 10%, floor 0.15x,
+#   conc 15, 6/day, sl_swing_lookback=5, tp_r_multiple=1.0:
+#     4-day  pass 32.3%  fail 55.6%   (n=870, half-split 26.9% / 37.9%)
+#     10-day pass 36.8%  fail 62.4%
+#
+# HONEST CAVEATS -- read before treating either number as solid:
+#   - Half-split dispersion is real (~11pp swing between halves). Treat
+#     32.3% as "high-20s to high-30s", not a precise figure.
+#   - 60% pass rate is NOT reachable at any horizon tested -- the
+#     theoretical ceiling (scripts/theoretical_ceiling.py) needs a Sharpe
+#     ~16 edge; everything measurable in this market tops out ~0.03-0.12.
+#     This book is the evidenced ceiling, not a step toward 60%.
+#   - POST-PASS SURVIVABILITY IS THE REAL RISK: running the FLAT-risk
+#     version of this exact roster unchanged for 250 trading days blows
+#     the account 97-100% of the time (scratch/ftmo_4day_survivability.py).
+#     The adaptive taper's target-side backoff + the `banked` phase cut
+#     below both fight this, but the combination was NOT re-tested for
+#     the adaptive scheme -- do not assume it is solved. If a real
+#     challenge is ever actually passed on this config, CUT RISK BY HAND
+#     immediately (post_target_risk_frac only covers the banked-but-not-
+#     yet-4-days window, not the funded phase after).
+#   - No currency cap, deliberately -- capping measured to collapse pass
+#     rate at this objective (only ~4.9 independent bets in the basket,
+#     so uncapped concentration is what buys the speed here). This is a
+#     DIFFERENT, evidence-based choice from the main FTMO book, which
+#     keeps a 2R cap for its 10/30-day objective -- not an oversight.
+#
+# Paper/demo only (MetaQuotes-Demo). No live credentials exist for this book.
+
+capital:
+  risk_mode: percent_equity
+  risk_pct: 10.0
+  account_size_usd: 10000
+  risk_usd_per_trade: 1000       # 10% of 10k; R unit for slot-health/K10 only
+
+  trail_start_r: 0.0
+  trail_lock_fraction: 0.0
+
+  daily_stop_loss_usd: -500      # -5%, the actual FTMO daily rule (not a margin like the main book)
+  daily_stop_action: block
+  max_total_drawdown_usd: -1000  # -10%, the actual FTMO total rule -- the adaptive taper, not an
+                                  # extra safety margin, is what backs off risk approaching this
+  max_positions_per_config: 1
+
+  max_total_open_risk_r: 15
+  max_concurrent_positions_total: 15
+  max_currency_exposure_r: 0     # uncapped -- see header, capping measured to hurt this objective
+  max_signal_age_bars: 2
+  min_lot_policy: skip
+
+  skip_weekdays: [6]             # partial Sunday bar
+  max_trades_per_day: 6
+
+  weekly_stop_pct: 0.0
+
+  k4_consecutive_loss_halving_enabled: false   # same reasoning as the main FTMO book: a
+  k4_consecutive_loss_trigger: 4               # confluence book WILL string losses, halving
+  k4_recovery_wins_needed: 2                   # here would shrink the size that pays for them
+
+  k6_spread_anomaly_enabled: true
+  k6_spread_multiple: 5.0
+  k6_persist_s: 30.0
+
+  k8_slippage_recalibration_enabled: true
+  k8_window_trades: 20
+  k8_slippage_multiple: 2.0
+
+  k9_ntp_drift_enabled: true
+  k9_max_drift_s: 5.0
+  k9_check_interval_s: 300.0
+
+  k10_lot_anomaly_enabled: true
+  k10_window_trades: 20
+  k10_lot_multiple: 3.0
+
+  cost_gate_enabled: true
+  cost_gate_r: 0.04
+
+  slot_health:
+    enabled: false
+  learning:
+    enabled: false
+  auto_retune:
+    enabled: false
+
+  # Path-dependent risk sizing -- the mechanism validated in
+  # scratch/ftmo_4day_adaptive_risk.py. Full base risk while far from both
+  # the +10% target and the -10% loss limit; tapers toward floor_frac of
+  # base as book equity nears EITHER barrier. These five values are the
+  # exact "AGGRESSIVE symmetric" backtest cell (32.3%/55.6% at 4 days).
+  adaptive_risk:
+    enabled: true
+    mode: symmetric
+    band_pct: 10.0
+    floor_frac: 0.15
+    target_pct: 10.0
+    loss_pct: 10.0
+
+configs:
+  # Identical roster to config/portfolio_ftmo.yaml's RSI_Confluence leg,
+  # except sl_swing_lookback tightened 10 -> 5 bars: validated in the SL/TP
+  # sweep to improve 4-day pass rate at an UNCHANGED fail rate (faster
+  # trade resolution matters more than a wider stop at this horizon).
+  - name: RSI_Confluence_4Day
+    strategy: Confluence
+    timeframe: 1d
+    magic_base: 8100
+    symbols: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, USDCHF, NZDUSD, EURJPY,
+              GBPJPY, NZDJPY, AUDJPY, CHFJPY, GBPCHF, EURCHF, AUDCHF, EURAUD, AUDCAD]
+    strategy_params:
+      confluence:
+        legs:
+          - strategy: RSIReversion
+            rsi: {period: 14, oversold: 30, overbought: 70}
+          - strategy: RSIReversion
+            rsi: {period: 7, oversold: 25, overbought: 75}
+        same_direction: true
+      exit: {tp_r_multiple: 1.0, sl_swing_lookback: 5, trail_start_r: 0.0}
+
+ftmo:
+  enabled: true
+  scope: book
+  account_size_usd: 10000
+
+  # Advance this BY HAND after each phase, same convention as the main
+  # FTMO book -- FTMO's own dashboard is the authority on a real pass.
+  phase: challenge
+
+  # Target banked, day count not yet met: drop to 10% of normal (already
+  # tapered) risk so the pass cannot be given back while waiting out the
+  # remaining trading days. This does NOT cover the funded phase after a
+  # real pass -- see the header caveat.
+  post_target_risk_frac: 0.1
+
+  daily_trigger_pct: 4.0
+  overall_trigger_pct: 8.0
+  target_pct: 10.0
+  target_action: alert
+
+  weekend_flat: false
+  weekend_close_utc: "20:30"
+  news_blackout: []
+
+watchdog:
+  enabled: true
+  stale_tick_s: 300
+
+mt5:
+  symbol_map: {}
+  poll_interval_s: 5
+
+ledger:
+  path: data/paper_ledger_ftmo4day.sqlite

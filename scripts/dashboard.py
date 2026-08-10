@@ -42,11 +42,22 @@ from metatraderbot.mt5_engine import MT5Engine  # noqa: E402 — reuse filling-m
 TARGET_ACCOUNT = {
     "FTMO": 10_000.0,
     "YOLO": 200.0,
+    "FTMO_4DAY": 10_000.0,
 }
 
 CONFIG_FILE = {
     "FTMO": "portfolio_ftmo.yaml",
     "YOLO": "portfolio_yolo.yaml",
+    "FTMO_4DAY": "portfolio_ftmo_4day.yaml",
+}
+
+# Ledger filename per bot -- kept as an explicit dict (not derived from
+# each YAML's own ledger.path) so the sidebar can resolve it without a
+# config-file read on every rerun.
+LEDGER_FILE = {
+    "FTMO": "paper_ledger.sqlite",
+    "YOLO": "paper_ledger_yolo.sqlite",
+    "FTMO_4DAY": "paper_ledger_ftmo4day.sqlite",
 }
 
 
@@ -129,16 +140,52 @@ STRATEGY_INFO = {
 }
 
 
+_LABEL_ICON = {"Donchian": "📐", "MACD": "〰️", "BOS": "🏛️", "VWAPReversion": "📊",
+               "SweepReclaim": "🌊", "TODReversion": "🕐", "NoWick": "🕯️",
+               "Bollinger": "🎯", "RSI": "〽️", "Stochastic": "📉", "SMACross": "✖️", "ORB": "🚪"}
+
+
 def strategy_cell_html(strategy_type: str, config_name: str, show_explain: bool = True) -> str:
     """Small HTML block: strategy display name + icon (+ optional one-line
-    explanation), used inline next to a trade so the 'which strategy' info
-    travels with every row instead of living only in docs."""
-    info = STRATEGY_INFO.get(strategy_type, {"icon": "❔", "label": strategy_type or "Unknown", "explain": ""})
-    html = f"<span style='font-weight:600'>{info['icon']} {info['label']}</span>"
-    if show_explain:
-        html += f"<br><small style='opacity:0.65'>{info['explain']}</small>"
+    explanation). Resolves the strategy from the config/leg NAME (via
+    strategy_label) so it works for both the new Strategy__SYMBOL legs and
+    the old per-pair names — never shows a bare '?'."""
+    info = STRATEGY_INFO.get(strategy_type)
+    if info:
+        icon, label, explain = info["icon"], info["label"], info["explain"]
+    else:
+        label = strategy_label(config_name)
+        icon = _LABEL_ICON.get(label, "📊")
+        explain = ""
+    html = f"<span style='font-weight:600'>{icon} {label}</span>"
+    if show_explain and explain:
+        html += f"<br><small style='opacity:0.65'>{explain}</small>"
     html += f"<br><small style='opacity:0.4'>{config_name}</small>"
     return html
+
+
+def _expand_config_legs(configs: list) -> list:
+    """Expand per-strategy entries (symbols:[] + magic_base:) into per-symbol
+    legs — same rule the runner uses (name = Strategy__SYMBOL, magic =
+    magic_base + index). Legacy single-symbol entries pass through. Kept
+    inline so the dashboard doesn't import the MT5-dependent runner."""
+    out = []
+    for entry in configs or []:
+        syms = entry.get("symbols")
+        if syms:
+            base = int(entry.get("magic_base", 0))
+            for i, sym in enumerate(syms):
+                leg = {k: v for k, v in entry.items() if k not in ("symbols", "magic_base")}
+                leg["symbol"] = sym
+                leg["magic_number"] = base + i
+                leg["name"] = f"{entry.get('name', 'strat')}__{sym}"
+                leg["strategy_group"] = entry.get("name", "")
+                out.append(leg)
+        else:
+            leg = dict(entry)
+            leg.setdefault("strategy_group", entry.get("name", ""))
+            out.append(leg)
+    return out
 
 
 def load_slot_names(bot_choice: str) -> dict[int, dict]:
@@ -149,8 +196,9 @@ def load_slot_names(bot_choice: str) -> dict[int, dict]:
     with open(path) as f:
         cfg = yaml.safe_load(f)
     return {
-        c["magic_number"]: {"name": c["name"], "symbol": c["symbol"], "timeframe": c["timeframe"], "strategy": c["strategy"]}
-        for c in cfg.get("configs", [])
+        c["magic_number"]: {"name": c["name"], "symbol": c["symbol"],
+                            "timeframe": c["timeframe"], "strategy": c["strategy"]}
+        for c in _expand_config_legs(cfg.get("configs", []))
     }
 
 
@@ -162,7 +210,7 @@ def load_strategy_by_config_name(bot_choice: str) -> dict[str, str]:
         return {}
     with open(path) as f:
         cfg = yaml.safe_load(f)
-    return {c["name"]: c["strategy"] for c in cfg.get("configs", [])}
+    return {c["name"]: c["strategy"] for c in _expand_config_legs(cfg.get("configs", []))}
 
 
 def get_live_open_positions(slots: dict[int, dict]) -> pd.DataFrame | None:
@@ -177,15 +225,26 @@ def get_live_open_positions(slots: dict[int, dict]) -> pd.DataFrame | None:
     if not mt5.initialize():
         return None
     positions = mt5.positions_get() or []
+    # Book magic-range: FTMO magics live in 2000-2999, YOLO in 3000-3999.
+    # After a config restructure the running bot may still hold positions on
+    # the OLD magic numbers — attribute them to the right book by range so
+    # they don't vanish from the dashboard during the transition.
+    book_base = (min(slots) // 1000) * 1000 if slots else None
     rows = []
     for p in positions:
-        if p.magic not in slots:
+        if p.magic in slots:
+            strat_name = slots[p.magic]["name"]
+            strat_type = slots[p.magic].get("strategy", "")
+        elif book_base is not None and book_base <= p.magic < book_base + 1000:
+            strat_name = f"(magic {p.magic})"
+            strat_type = ""
+        else:
             continue
         rows.append({
             "Ticket": p.ticket,
             "Magic": p.magic,
-            "Strategy": slots[p.magic]["name"],
-            "StrategyType": slots[p.magic].get("strategy", ""),
+            "Strategy": strat_name,
+            "StrategyType": strat_type,
             "Symbol": p.symbol,
             "Dir": UP if p.type == mt5.POSITION_TYPE_BUY else DOWN,
             "Volume": p.volume,
@@ -206,8 +265,8 @@ def get_live_open_positions(slots: dict[int, dict]) -> pd.DataFrame | None:
 
 # Blue(up)/red-pink(down) palette — used consistently everywhere (charts,
 # P&L text, buttons) instead of the traditional green/red.
-_BG = "#0a0d16"
-_GRID = "#161b28"
+_BG = "#06080f"
+_GRID = "#141a2a"
 _AXIS_LABEL = "#93a1b3"
 _UP, _DOWN = "#4c6ef5", "#f5426c"          # candle body/wick colors
 _TP_COLOR, _SL_COLOR = "#4c6ef5", "#f5426c"  # TP=blue (target), SL=red-pink (stop)
@@ -253,7 +312,7 @@ def build_live_chart_html(symbol: str, ticket: int, is_long: bool, default_timef
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
   #chart_wrap_{ticket} * {{ font-family: 'Inter', sans-serif; }}
 </style>
-<div id="chart_wrap_{ticket}" style="background:{_BG}; padding:8px; border-radius:10px; border:1px solid rgba(255,255,255,0.06);">
+<div id="chart_wrap_{ticket}" style="background:{_BG}; padding:8px; border-radius:10px; border:1px solid rgba(34,211,238,0.22); box-shadow:0 0 26px rgba(34,211,238,0.08), inset 0 0 40px rgba(34,211,238,0.02);">
   <div style="margin-bottom:8px; display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;">
     <div id="pnl_{ticket}" style="font-size:1.7rem; font-weight:700; line-height:1;"></div>
     <div id="stats_{ticket}" style="color:{_AXIS_LABEL}; font-size:0.85rem; opacity:0.85;"></div>
@@ -310,7 +369,7 @@ def build_live_chart_html(symbol: str, ticket: int, is_long: bool, default_timef
   window.addEventListener("resize", () => chart.applyOptions({{ width: container.clientWidth }}));
 
   let tf = "{default_timeframe}";
-  let slLine = null, tpLine = null, markersSet = false, hadPosition = false;
+  let slLine = null, tpLine = null, entryLine = null, markersSet = false, hadPosition = false;
   const statsEl = document.getElementById("stats_{ticket}");
   const pnlEl = document.getElementById("pnl_{ticket}");
 
@@ -341,9 +400,11 @@ def build_live_chart_html(symbol: str, ticket: int, is_long: bool, default_timef
         if (!slLine) {{
           slLine = series.createPriceLine({{price: p.sl, color: "{_SL_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "SL"}});
           tpLine = series.createPriceLine({{price: p.tp, color: "{_TP_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "TP"}});
+          entryLine = series.createPriceLine({{price: p.entry, color: "{_ENTRY_COLOR}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, title: "Entry"}});
         }} else {{
           slLine.applyOptions({{price: p.sl}});
           tpLine.applyOptions({{price: p.tp}});
+          entryLine.applyOptions({{price: p.entry}});
         }}
         const firstT = data.bars[0].time;
         const lastT = data.bars[data.bars.length - 1].time;
@@ -455,7 +516,7 @@ def build_closed_trade_chart_html(
     # in this chart specifically, SL/TP need to read as "risk levels", not
     # blend in with the candle-color language, so they get their own
     # unambiguous red/gold here.
-    replay_sl_color, replay_tp_color = "#ff5252", "#ffca28"
+    replay_sl_color, replay_tp_color, replay_entry_color = "#ff5252", "#ffca28", "#ffffff"
 
     reason_label = {"tp": "hit take-profit", "sl": "hit stop-loss (or trailing stop)", "manual": "closed manually"}.get(exit_reason, exit_reason)
 
@@ -466,7 +527,7 @@ def build_closed_trade_chart_html(
   #chart_wrap_{div_id} button:hover {{ background:rgba(255,255,255,0.1) !important; }}
   #chart_wrap_{div_id} button:disabled {{ opacity:0.35; cursor:default; }}
 </style>
-<div id="chart_wrap_{div_id}" style="background:{_BG}; padding:8px; border-radius:10px; border:1px solid rgba(255,255,255,0.06);">
+<div id="chart_wrap_{div_id}" style="background:{_BG}; padding:8px; border-radius:10px; border:1px solid rgba(34,211,238,0.22); box-shadow:0 0 26px rgba(34,211,238,0.08), inset 0 0 40px rgba(34,211,238,0.02);">
   <div style="margin-bottom:8px; display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;">
     <div id="pnl_{div_id}" style="font-size:1.4rem; font-weight:700; color:{exit_color};">
       {'+' if win else ''}{pnl:.2f} USD
@@ -646,12 +707,13 @@ def build_closed_trade_chart_html(
 
       // SL/TP as bold, unambiguous reference lines — thicker and in their
       // own red/gold (not the candle-color blue/pink) so they read as risk
-      // levels at a glance. Entry/exit are already fully identified by their
-      // arrow markers below (price is right there in the marker text), so
-      // no separate price line for those — cut to avoid four overlapping
-      // lines/labels competing for attention in an already-tight view.
+      // levels at a glance. Entry gets its own dotted white line too (thinner
+      // + a different dash style than SL/TP so the three don't compete when
+      // they sit close together) — the arrow marker alone only labels the
+      // entry bar itself, not the level across the whole replay window.
       series.createPriceLine({{price: {sl}, color: "{replay_sl_color}", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: "SL"}});
       series.createPriceLine({{price: {tp}, color: "{replay_tp_color}", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: "TP"}});
+      series.createPriceLine({{price: {entry}, color: "{replay_entry_color}", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, title: "Entry"}});
 
       entryBarTime = snapToBar(allBars, {opened_broker_ts});
       exitBarTime = snapToBar(allBars, {closed_broker_ts});
@@ -756,8 +818,8 @@ st.markdown("""
     --up-soft: rgba(76,110,245,0.12);
     --down: #f5426c;
     --down-soft: rgba(245,66,108,0.12);
-    --bg: #0b0e16;
-    --panel: #131722;
+    --bg: #06080f;
+    --panel: #0d1220;
     --panel-border: rgba(255,255,255,0.06);
     --soft-shadow: 0 4px 16px rgba(0,0,0,0.25);
 }
@@ -867,11 +929,220 @@ hr { border-color: var(--panel-border) !important; }
 </style>
 """, unsafe_allow_html=True)
 
+# --- Neon "self-healing terminal" skin (Phase 6) — layered ON TOP of the
+# base theme above so the LAYOUT is unchanged; only colours, glow and the
+# accent treatment change to match the reference look. ---
+st.markdown("""
+<style>
+:root {
+    --neon-cyan: #22d3ee; --neon-magenta: #ff4fd8; --neon-lime: #a3e635;
+    --neon-blue: #4c6ef5; --neon-purple: #a78bfa;
+}
+.stApp {
+    background:
+        radial-gradient(1200px 600px at 15% -10%, rgba(76,110,245,0.10), transparent 60%),
+        radial-gradient(1000px 500px at 100% 0%, rgba(255,79,216,0.07), transparent 55%),
+        var(--bg);
+}
+h1, h2, h3 { letter-spacing: 0.2px; text-shadow: 0 0 18px rgba(34,211,238,0.25); }
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border: 1px solid rgba(34,211,238,0.16) !important;
+    box-shadow: 0 0 0 1px rgba(34,211,238,0.05), 0 8px 28px rgba(0,0,0,0.45),
+                inset 0 1px 0 rgba(255,255,255,0.03);
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+    border-color: rgba(34,211,238,0.30) !important;
+}
+div[data-testid="stMetric"] {
+    border: 1px solid rgba(76,110,245,0.20);
+    box-shadow: 0 0 22px rgba(76,110,245,0.10), var(--soft-shadow);
+}
+div[data-testid="stMetricValue"] { text-shadow: 0 0 16px rgba(34,211,238,0.30); }
+/* subheaders get a neon left-rule */
+div[data-testid="stVerticalBlockBorderWrapper"] h3 {
+    border-left: 3px solid var(--neon-cyan);
+    padding-left: 10px;
+    background: linear-gradient(90deg, rgba(34,211,238,0.08), transparent 40%);
+}
+.neon-panel { background: rgba(10,13,22,0.6); border: 1px solid rgba(34,211,238,0.16);
+    border-radius: 12px; padding: 12px 14px; }
+.why-row { border-left: 3px solid var(--neon-cyan); padding: 6px 10px; margin: 6px 0;
+    background: linear-gradient(90deg, rgba(34,211,238,0.06), transparent 60%);
+    border-radius: 0 8px 8px 0; font-size: 0.86rem; line-height: 1.45; }
+.why-row.loss { border-left-color: var(--neon-magenta);
+    background: linear-gradient(90deg, rgba(255,79,216,0.07), transparent 60%); }
+.why-tag { display:inline-block; font-size:0.72rem; font-weight:600; padding:1px 7px;
+    border-radius:10px; margin-right:6px; }
+.why-tag.win { background: rgba(76,110,245,0.18); color:#bcd0ff; }
+.why-tag.loss { background: rgba(255,79,216,0.16); color:#ffc7f0; }
+.verdict-pill { display:inline-block; font-size:0.74rem; padding:3px 9px; border-radius:12px;
+    margin:3px 6px 3px 0; border:1px solid rgba(255,255,255,0.08); }
+.verdict-pill.ok { color:#bcd0ff; background:rgba(76,110,245,0.12); }
+.verdict-pill.avoid { color:#ffc7f0; background:rgba(255,79,216,0.14); border-color:rgba(255,79,216,0.3); }
+
+/* ---- full-interface neon pass (whole app, layout unchanged) ---- */
+/* Data tables: neon header row + faint grid, dark glass body */
+div[data-testid="stDataFrame"] {
+    border: 1px solid rgba(34,211,238,0.20) !important;
+    box-shadow: 0 0 18px rgba(34,211,238,0.06);
+}
+div[data-testid="stDataFrame"] thead tr th {
+    background: rgba(34,211,238,0.10) !important;
+    color: #d6f4fb !important;
+    border-bottom: 1px solid rgba(34,211,238,0.35) !important;
+    text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.4px;
+}
+div[data-testid="stDataFrame"] tbody tr:hover td { background: rgba(34,211,238,0.05) !important; }
+
+/* Tabs: neon underline on the active tab */
+button[data-baseweb="tab"] { color: #8fa3bd !important; }
+button[data-baseweb="tab"][aria-selected="true"] {
+    color: #eaf6ff !important;
+    border-bottom: 2px solid var(--neon-cyan) !important;
+    text-shadow: 0 0 12px rgba(34,211,238,0.4);
+}
+div[data-baseweb="tab-highlight"] { background: var(--neon-cyan) !important; box-shadow: 0 0 10px var(--neon-cyan); }
+
+/* Buttons: neon outline that fills on hover */
+.stButton > button {
+    border: 1px solid rgba(34,211,238,0.5) !important;
+    color: #d6f4fb !important;
+    box-shadow: 0 0 14px rgba(34,211,238,0.10);
+}
+.stButton > button:hover {
+    background: rgba(34,211,238,0.16) !important;
+    border-color: var(--neon-cyan) !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 20px rgba(34,211,238,0.35) !important;
+}
+
+/* Sidebar: neon edge + heading glow */
+section[data-testid="stSidebar"] {
+    border-right: 1px solid rgba(34,211,238,0.22) !important;
+    box-shadow: inset -1px 0 0 rgba(34,211,238,0.06);
+}
+section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2 {
+    text-shadow: 0 0 14px rgba(34,211,238,0.3);
+}
+
+/* Ticker chips: neon ring */
+.ticker-chip {
+    border: 1px solid rgba(34,211,238,0.25) !important;
+    box-shadow: 0 0 14px rgba(34,211,238,0.08);
+}
+
+/* Radio / selectbox accents */
+div[role="radiogroup"] label:hover { color: var(--neon-cyan) !important; }
+
+/* Metric delta up/down keep the blue/pink scheme but glow a touch */
+div[data-testid="stMetricDelta"] { text-shadow: 0 0 10px rgba(76,110,245,0.25); }
+
+/* App header bar (top) faint neon rule */
+header[data-testid="stHeader"] { background: transparent !important; border-bottom: 1px solid rgba(34,211,238,0.12); }
+</style>
+""", unsafe_allow_html=True)
+
+
+def _epoch(ts) -> int:
+    t = pd.to_datetime(ts, utc=True, errors="coerce")
+    return int(t.timestamp()) if pd.notna(t) else 0
+
+
+# Bright neon palette for the per-strategy equity curves (matches the video).
+# Map ANY config/leg name to a clean strategy label — works for the new
+# "Strategy__SYMBOL" legs AND the old per-pair names like
+# "euraud_donchian_30m_3r" / "yolo_us30_bos_30m_ny", so the graph never
+# shows a pair, only the strategy.
+_STRAT_KEYWORDS = [
+    ("donchian", "Donchian"), ("macd", "MACD"), ("marketopenbos", "BOS"),
+    ("_bos", "BOS"), ("bos_", "BOS"), ("nowick", "NoWick"),
+    ("vwap", "VWAPReversion"), ("sweep", "SweepReclaim"), ("tod", "TODReversion"),
+    ("bollinger", "Bollinger"), ("stochastic", "Stochastic"), ("rsi", "RSI"),
+    ("smacross", "SMACross"), ("ma_cross", "SMACross"), ("orb", "ORB"),
+]
+
+
+def strategy_label(config_name: str) -> str:
+    # Match against the leading "Strategy" segment only (the "Strategy__SYMBOL"
+    # legs from expand_configs, or the whole legacy "<sym>_<strategy>_..." name
+    # when there's no "__"), NOT the full lowercased string -- a free substring
+    # search let e.g. "TrendPullbackBOS__XAUUSD" match the "bos_" keyword
+    # (from "...BOS__xauusd") and get mislabeled as the old MarketOpenBOS "BOS".
+    prefix = str(config_name).split("__")[0]
+    n = prefix.lower()
+    for kw, label in _STRAT_KEYWORDS:
+        if kw in n:
+            return label
+    return prefix
+
+
+_NEON_CYCLE = ["#22d3ee", "#ff4fd8", "#a3e635", "#f5d90a", "#a78bfa",
+               "#4c6ef5", "#fb7185", "#34d399", "#f97316", "#e879f9"]
+
+
+def build_strategy_curves_html(series_by_config: dict, height: int = 360) -> str:
+    """Multi-line neon equity chart — one climbing line per strategy, showing
+    how each is doing over time (the 'improving strategies' graph)."""
+    import json as _json
+    palette = {name: _NEON_CYCLE[i % len(_NEON_CYCLE)] for i, name in enumerate(series_by_config)}
+    series_js = _json.dumps({n: [{"time": t, "value": round(v, 2)} for t, v in pts]
+                             for n, pts in series_by_config.items()})
+    colors_js = _json.dumps(palette)
+    legend = "".join(
+        f"<span style='display:inline-flex;align-items:center;gap:5px;margin:0 10px 6px 0;font-size:0.78rem;color:#c7d2e0;'>"
+        f"<span style='width:14px;height:3px;border-radius:2px;background:{palette[n]};"
+        f"box-shadow:0 0 8px {palette[n]};'></span>{n}</span>"
+        for n in series_by_config
+    )
+    return f"""
+<div style="background:#05070e;border:1px solid rgba(34,211,238,0.28);border-radius:12px;padding:10px;
+            box-shadow:0 0 30px rgba(34,211,238,0.10), inset 0 0 60px rgba(34,211,238,0.03);">
+  <div style="margin-bottom:6px;">{legend}</div>
+  <div id="scurves" style="height:{height}px;
+       filter: drop-shadow(0 0 3px rgba(255,255,255,0.55)) drop-shadow(0 0 7px rgba(34,211,238,0.45));"></div>
+</div>
+<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+  const el = document.getElementById("scurves");
+  const chart = LightweightCharts.createChart(el, {{
+    width: el.clientWidth, height: {height},
+    layout: {{ background: {{ color: "#05070e" }}, textColor: "{_AXIS_LABEL}", fontFamily: "Inter, sans-serif" }},
+    grid: {{ vertLines: {{ color: "rgba(34,211,238,0.05)" }}, horzLines: {{ color: "rgba(34,211,238,0.05)" }} }},
+    rightPriceScale: {{ borderColor: "rgba(34,211,238,0.15)" }},
+    timeScale: {{ borderColor: "rgba(34,211,238,0.15)", timeVisible: true }},
+    crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }},
+  }});
+  const data = {series_js}; const colors = {colors_js};
+  for (const name in data) {{
+    const s = chart.addLineSeries({{ color: colors[name], lineWidth: 3, priceLineVisible: false, lastValueVisible: false }});
+    s.setData(data[name]);
+  }}
+  chart.timeScale().fitContent();
+  new ResizeObserver(() => chart.applyOptions({{ width: el.clientWidth }})).observe(el);
+</script>
+"""
+
+
+def load_reviews(path: Path):
+    """Recent trade reviews + learned per-(slot,session) verdicts for the
+    self-healing panel. Tolerant of an older DB with no trade_reviews table."""
+    try:
+        with sqlite3.connect(str(path)) as c:
+            recent = pd.read_sql(
+                "SELECT config_name, symbol, direction, exit_reason, pnl_usd, r_multiple, "
+                "session, was_win, why FROM trade_reviews ORDER BY id DESC LIMIT 25", c)
+            agg = pd.read_sql(
+                "SELECT config_name, session, COUNT(*) n, SUM(r_multiple) net_r "
+                "FROM trade_reviews GROUP BY config_name, session", c)
+        return recent, agg
+    except Exception:
+        return pd.DataFrame(), pd.DataFrame()
+
 # --- Sidebar (outside the live fragment — changing these does a normal full rerun) ---
 st.sidebar.header("Config")
 bot_choice = st.sidebar.radio(
     "Bot",
-    ("FTMO", "YOLO"),
+    ("FTMO", "YOLO", "FTMO_4DAY"),
     help="Pick which bot's ledger to view.",
 )
 target_size = TARGET_ACCOUNT[bot_choice]
@@ -885,19 +1156,25 @@ target_size = st.sidebar.number_input(
 )
 refresh_s = st.sidebar.slider("Live-update every (sec)", 2, 60, 5)
 
-ledger_path = ROOT / "data" / (
-    "paper_ledger.sqlite" if bot_choice == "FTMO" else "paper_ledger_yolo.sqlite"
-)
+ledger_path = ROOT / "data" / LEDGER_FILE[bot_choice]
 
 st.markdown(f"""
-<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
-  <img class="app-logo" src="{_logo_data_uri(_LOGO_SMALL_PATH)}" />
-  <span style="font-size:2.3rem; font-weight:600; color:#eef2f6;">
+<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px;">
+  <img class="app-logo" src="{_logo_data_uri(_LOGO_SMALL_PATH)}" style="filter:drop-shadow(0 0 10px rgba(34,211,238,0.6));" />
+  <span style="font-size:2.4rem; font-weight:600; letter-spacing:0.5px;
+        background:linear-gradient(90deg,#22d3ee,#7fb6ff,#ff4fd8);
+        -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+        filter:drop-shadow(0 0 16px rgba(34,211,238,0.45));">
     Vertex Algo Bot
   </span>
-  <span style="font-size:1.05rem; color:#4c6ef5; opacity:0.9;">
+  <span style="font-size:0.9rem; font-weight:600; color:#22d3ee; letter-spacing:1px;
+        border:1px solid rgba(34,211,238,0.5); border-radius:20px; padding:3px 12px;
+        box-shadow:0 0 14px rgba(34,211,238,0.3); text-shadow:0 0 8px rgba(34,211,238,0.6);">
     {bot_choice}
   </span>
+  <span style="font-size:0.72rem; font-weight:600; color:#a3e635; letter-spacing:1px;
+        border:1px solid rgba(163,230,53,0.4); border-radius:20px; padding:3px 10px; margin-left:2px;
+        box-shadow:0 0 12px rgba(163,230,53,0.2);">SELF-HEALING</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1179,14 +1456,74 @@ def render_equity_and_stats() -> None:
         st.line_chart(curve.set_index("closed_ts")[["virtual_equity"]])
 
     with st.container(border=True):
+        # --- Per-strategy improving equity curves — one neon line per
+        # strategy, cumulative P&L over time (the "how each strategy is
+        # improving" graph). ---
+        st.subheader("📈 Strategy equity curves — each strategy over time")
+        if len(closed):
+            cc = closed[["config_name", "closed_ts", "pnl_usd"]].dropna(subset=["pnl_usd"]).copy()
+            cc = cc.sort_values("closed_ts")
+            # Group by STRATEGY, not per pair: "Donchian__XAUUSD" -> "Donchian".
+            # All of a strategy's per-symbol legs sum into one climbing line.
+            cc["strategy"] = cc["config_name"].map(strategy_label)
+            series_by_config: dict[str, list] = {}
+            for name, grp in cc.groupby("strategy"):
+                cum = grp["pnl_usd"].cumsum()
+                pts = [(_epoch(ts), float(v)) for ts, v in zip(grp["closed_ts"], cum) if _epoch(ts)]
+                # de-dup identical timestamps (lightweight-charts requires strictly increasing time)
+                seen = {}
+                for t, v in pts:
+                    seen[t] = v
+                if len(seen) >= 1:
+                    series_by_config[str(name)] = sorted(seen.items())
+            if series_by_config:
+                components.html(build_strategy_curves_html(series_by_config, height=360),
+                                height=430, scrolling=False)
+            else:
+                st.caption("No closed trades yet — curves appear as trades close.")
+        else:
+            st.caption("No closed trades yet — curves appear as each strategy starts trading.")
+
+    with st.container(border=True):
+        # --- Self-healing / learning: the "why it happened" memory + what the
+        # bot has learned to avoid. This is the honest version of the video's
+        # "every win/loss AI answers why and improves the strategy". ---
+        st.subheader("🧠 Self-healing — what the bot learned from each trade")
+        recent_rv, agg_rv = load_reviews(ledger_path)
+        if len(agg_rv):
+            pills = []
+            for _, r in agg_rv.sort_values("net_r").iterrows():
+                avoid = (r["n"] >= 6 and r["net_r"] <= -3.0)
+                cls = "avoid" if avoid else "ok"
+                label = ("avoiding" if avoid else "ok")
+                pills.append(
+                    f"<span class='verdict-pill {cls}'>{r['config_name']} · {r['session']}: "
+                    f"{int(r['n'])} trades, {r['net_r']:+.1f}R — {label}</span>")
+            st.markdown("<div class='neon-panel'><b style='color:#c7d2e0;'>Learned session verdicts</b><br>"
+                        + "".join(pills) + "</div>", unsafe_allow_html=True)
+        if len(recent_rv):
+            rows_html = []
+            for _, r in recent_rv.iterrows():
+                win = bool(r["was_win"])
+                cls = "" if win else "loss"
+                tag = "win" if win else "loss"
+                rows_html.append(
+                    f"<div class='why-row {cls}'><span class='why-tag {tag}'>"
+                    f"{'WIN' if win else 'LOSS'} {r['r_multiple']:+.2f}R</span>"
+                    f"<b>{r['config_name']}</b> · {r['symbol']} — {r['why']}</div>")
+            st.markdown("<div style='margin-top:10px;'>" + "".join(rows_html) + "</div>",
+                        unsafe_allow_html=True)
+        elif not len(agg_rv):
+            st.caption("The learning log fills in as trades close — each one gets a stored "
+                       "post-mortem here, and repeated losses in a session bench that slot.")
+
+    with st.container(border=True):
         # --- Per-strategy breakdown ---
         st.subheader("Per-strategy performance")
         if len(closed):
-            strat_by_name = load_strategy_by_config_name(bot_choice)
             closed_typed = closed.copy()
-            closed_typed["strategy_type"] = closed_typed["config_name"].map(
-                lambda n: STRATEGY_INFO.get(strat_by_name.get(n, ""), {}).get("label", strat_by_name.get(n, "Unknown"))
-            )
+            # Robust for both new (Strategy__SYMBOL) and old per-pair names.
+            closed_typed["strategy_type"] = closed_typed["config_name"].map(strategy_label)
             grp = (
                 closed_typed.groupby("strategy_type")
                 .agg(

@@ -4,10 +4,11 @@ __pycache__/
 *.pyc
 *.pyo
 .env
-data/*.csv
-data/*.parquet
-data/*.pkl
-data/*.json
+# Runtime state: parquet history, ledgers, bot state/anchors, and every
+# archive_*/ backup of same. Ignoring the whole directory, not per-extension
+# patterns -- those don't recurse into subdirectories (data/archive_*/*.json
+# slipped through on 2026-08-10, which is why this is now a blanket rule).
+data/
 !data/.gitkeep
 logs/
 *.log
@@ -17,5 +18,16 @@ logs/
 .claude-flow/
 backtest/results/
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 *.sqlite.bak
 *.db
+
+# Regenerable knowledge-graph cache (rebuild: graphify update .)
+graphify-out/
+
+# Large pooled-trade backtest caches -- regenerable from the *.py next to
+# them, not source. The analysis scripts themselves ARE tracked.
+scratch/*.pkl
+scratch/*.csv
+backtest/*.pkl
