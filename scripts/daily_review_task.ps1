@@ -36,6 +36,11 @@ if ($Apply -or $ApplyCalibration) { $argList += "--apply" }
 
 "=== exit code $LASTEXITCODE ===" | Out-File -FilePath $log -Append -Encoding utf8
 
+# Mirror the day into the Obsidian vault (notes/Journal/YYYY-MM-DD.md) so the
+# AIs and the human read the same record. Read-only against the ledgers.
+& $Python -u (Join-Path $Root "scripts\vault_journal.py") --review-log $log 2>&1 |
+    Out-File -FilePath $log -Append -Encoding utf8
+
 # Keep 60 days of reports; the whole point is a trend, not one snapshot.
 Get-ChildItem $LogDir -Filter "review_*.log" |
     Sort-Object LastWriteTime -Descending |

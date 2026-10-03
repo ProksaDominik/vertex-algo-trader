@@ -1,0 +1,12 @@
+{
+  "userIgnoreFilters": [
+    "data/",
+    "logs/",
+    "graphify-out/",
+    "external/",
+    ".venv/"
+  ],
+  "newFileLocation": "folder",
+  "newFileFolderPath": "notes/Inbox",
+  "alwaysUpdateLinks": true
+}
