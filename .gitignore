@@ -31,3 +31,8 @@ graphify-out/
 scratch/*.pkl
 scratch/*.csv
 backtest/*.pkl
+
+# Obsidian: share vault settings, not per-machine UI state
+.obsidian/workspace*.json
+.obsidian/cache
+.trash/
