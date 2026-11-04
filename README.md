@@ -60,11 +60,7 @@ How often each kind of year happened:
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | $115 (reset $120) | 41% | 37% | $823 | 52% | 23% | 74% | −$3,325 | $20,900 |
 
-### Live
 
-−$1,159 after about five weeks of live trading. One account has about a 1 in 4
-chance of still being down after two months, so this is possible — but it is
-the weak end of the range.
 
 ## How the strategy was chosen
 
