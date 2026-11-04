@@ -24,6 +24,8 @@ import pandas as pd
 
 try:
     import MetaTrader5 as mt5
+    from metatraderbot.mt5_lock import install_mt5_lock
+    install_mt5_lock(mt5)  # serialize IPC calls across the Funded/Trial/dashboard processes
     _MT5_AVAILABLE = True
 except ImportError:
     _MT5_AVAILABLE = False
@@ -79,7 +81,23 @@ class OrderResult:
         # 10009 DONE, 10010 DONE_PARTIAL — a partial fill still means a real
         # position exists and MUST be tracked (treating it as failure left
         # live positions invisible to the runner; AUDIT H3).
-        return self.retcode in (10009, 10010)
+        # 0 is ALSO success on this broker's bridge (MetaQuotes-Demo) --
+        # confirmed empirically 2026-08-20: order_send returns retcode=0,
+        # comment="Done" on a genuinely filled order (real deal/order
+        # tickets, position actually opens/closes). Not a documented MQL5
+        # code; this broker just doesn't follow the standard numbering.
+        # Treating 0 as failure (the bug before this fix) meant every real
+        # fill got logged as a failure and never tracked by the runner.
+        #
+        # BUT retcode=0 alone is not enough (fixed 2026-08-21): a REJECTED
+        # order can also come back as retcode=0 with an all-zero body, and
+        # accepting those made the runner log phantom "opened" trades and
+        # fire Telegram alerts for positions that never existed on the
+        # broker. A genuine fill always carries a non-zero order ticket, so
+        # require one before believing an ambiguous 0.
+        if self.retcode in (10009, 10010):
+            return True
+        return self.retcode == 0 and self.ticket != 0
 
     @property
     def partial(self) -> bool:
@@ -129,6 +147,7 @@ class MT5Engine:
         self._connected = False
         self._resolved: dict[str, str] = {}
         self._filling_mode: dict[str, int] = {}
+        self._broker_offset: int = 0   # last known-good broker-clock offset, see _cached_offset
 
     # --- connection lifecycle ---
 
@@ -323,13 +342,47 @@ class MT5Engine:
         df = df[["timestamp", "open", "high", "low", "close", "tick_volume"]]
         df = df.rename(columns={"tick_volume": "volume"})
         df = df.set_index("timestamp")
+
+        # Bar timestamps arrive on the BROKER's clock, not UTC (this server runs
+        # UTC+3). Correct them here, at the single point every caller goes
+        # through, so strategies never have to know about it.
+        #
+        # This was a live/backtest divergence, not a cosmetic issue. The
+        # historical parquet files are true UTC (their weekly gap runs Fri 20:45
+        # -> Sun 22:00, matching the real FX week), so every session strategy was
+        # BACKTESTED on true UTC but ran LIVE on broker time. LondonBreakout's
+        # 07:00-10:00 "London" window was really firing 04:00-07:00 UTC -- the
+        # tail of the Asian session, three hours before London opens. It was
+        # measuring the wrong range and breaking out of it at the wrong time.
+        offset = self._cached_offset(broker_sym)
+        if offset:
+            df.index = df.index - timedelta(seconds=offset)
         return df
+
+    def _cached_offset(self, broker_sym: str) -> int:
+        """Broker-clock offset, remembered across calls.
+
+        broker_offset_seconds() needs a FRESH tick to measure against, and
+        returns its fallback when the market is shut. Caching the last
+        known-good value means bars stay correctly stamped over a weekend
+        instead of silently reverting to an uncorrected clock -- which would
+        make the correction come and go with the session.
+        """
+        measured = self.broker_offset_seconds(broker_sym, fallback=0)
+        if measured:
+            self._broker_offset = measured
+        return getattr(self, "_broker_offset", 0)
 
     # --- positions + orders ---
 
     def get_positions(self, magic: int) -> list:
         positions = mt5.positions_get() or []
         return [p for p in positions if p.magic == magic]
+
+    def get_position(self, ticket: int):
+        """The open position with this ticket, or None once it is closed."""
+        positions = mt5.positions_get(ticket=ticket)
+        return positions[0] if positions else None
 
     def get_all_open_tickets(self) -> set[int]:
         """Every currently-open ticket on the account, regardless of magic --
@@ -441,11 +494,15 @@ class MT5Engine:
                 "comment": "partial_take",
                 "type_filling": filling,
             }
-            result = mt5.order_send(request)
+            result = mt5.order_send(**request)
             if result is not None and result.retcode != mt5.TRADE_RETCODE_INVALID_FILL:
                 self._filling_mode[p.symbol] = filling
                 break
-        return result is not None and result.retcode in (10009, 10010)
+        # Requires a real deal ticket when retcode==0 -- see close_position().
+        return result is not None and (
+            result.retcode in (10009, 10010)
+            or (result.retcode == 0 and (getattr(result, "deal", 0)
+                                         or getattr(result, "order", 0))))
 
     def usd_per_point(self, symbol: str) -> Optional[float]:
         """Account-currency P&L per lot per 1.0 price-unit move, from LIVE
@@ -466,7 +523,37 @@ class MT5Engine:
         tick_size = getattr(info, "trade_tick_size", 0.0) or 0.0
         if tick_value <= 0 or tick_size <= 0:
             return None
-        return tick_value / tick_size
+        live = tick_value / tick_size
+
+        # --- drift gate against the frozen table ----------------------------
+        #
+        # The arithmetic above is right; the BROKER'S INPUT CAN BE WRONG. This
+        # server reports trade_tick_value=0.1 for XAUUSD, giving 10.0 USD per
+        # price unit per lot. Live P&L on four open gold positions proves the
+        # true figure is 100.0: -1350.30 USD over a 192.90 move on 0.07 lots is
+        # exactly 100/point/lot. Sizing off the broker's number therefore built
+        # gold positions TEN TIMES too large -- ~4,722 USD of risk each where
+        # 500 was intended, against a 2,000 USD daily loss limit.
+        #
+        # So the two independent sources are compared, and on material
+        # disagreement the LARGER multiplier wins, because a larger multiplier
+        # yields a SMALLER position. Under-sizing costs a little profit;
+        # over-sizing loses the account. Never silently prefer the broker.
+        try:
+            from metatraderbot.instruments import contract_mult
+            frozen = float(contract_mult(symbol) or 0.0)
+        except Exception:
+            frozen = 0.0
+        if frozen > 0 and max(live, frozen) / min(live, frozen) >= 2.0:
+            safe = max(live, frozen)
+            log.error(
+                "CONTRACT MULTIPLIER DRIFT on %s: broker tick_value/tick_size "
+                "gives %.4f, instruments.contract_mult gives %.4f (%.1fx apart). "
+                "Using %.4f -- the larger value, which sizes SMALLER. Verify "
+                "against a real fill before trusting either.",
+                symbol, live, frozen, max(live, frozen) / min(live, frozen), safe)
+            return safe
+        return live
 
     def volume_spec(self, symbol: str) -> tuple[float, float, float]:
         """(volume_min, volume_max, volume_step) from live symbol info,
@@ -584,10 +671,29 @@ class MT5Engine:
                     "tp": a_tp,
                     "deviation": deviation_points,
                     "magic": magic,
-                    "comment": comment[:31],
+                    # 29, not the commonly-cited MQL5 limit of 31 -- empirically
+                    # confirmed 2026-08-20 on this broker (MetaQuotes-Demo,
+                    # package 5.0.5735): a 30+ char comment makes order_send
+                    # silently return None with a misleading client-side error
+                    # (blamed "comment", "unnamed arguments", or "invalid
+                    # request" depending on which other field it notices
+                    # first), regardless of the comment's actual content --
+                    # bisected char-by-char, 29 always works, 30 always fails.
+                    # This is why every roster leg's descriptive comment
+                    # (e.g. "lucidpro_funded_Donchian_XAUUSD_1R") had been
+                    # failing every single order since go-live.
+                    "comment": comment[:29],
                     "type_filling": filling,
                 }
-                result = mt5.order_send(request)
+                # **request, NOT order_send(request) or order_send(request=request) --
+                # this installed MetaTrader5 package version (5.0.5735) silently
+                # rejects both of those with a client-side (-2, "Unnamed arguments
+                # not allowed")/"Invalid request" error and returns an empty
+                # TradeRequest echo, despite its own docstring saying
+                # order_send(request). Confirmed 2026-08-20: this is why every
+                # order attempt had been failing since go-live, unrelated to the
+                # IPC-concurrency issue mt5_lock.py separately fixes.
+                result = mt5.order_send(**request)
                 if result is not None and result.retcode != mt5.TRADE_RETCODE_INVALID_FILL:
                     self._filling_mode[broker_sym] = filling  # cache the one that stuck
                     break
@@ -648,11 +754,20 @@ class MT5Engine:
                     "magic": p.magic,
                     "type_filling": filling,
                 }
-                result = mt5.order_send(request)
+                result = mt5.order_send(**request)
                 if result is not None and result.retcode != mt5.TRADE_RETCODE_INVALID_FILL:
                     self._filling_mode[p.symbol] = filling
                     break
-            if result is not None and result.retcode in (10009, 10010):
+            # Same ambiguity as OrderResult.ok: this broker returns retcode=0
+            # for success, but ALSO for a no-op rejection -- e.g. any close
+            # attempted while the market is shut comes back retcode=0,
+            # comment="Done", deal=0, order=0 and closes nothing. Reporting
+            # that as success made a "close all" claim 21/21 closed while all
+            # 21 were still open. A real fill always carries a deal ticket.
+            if result is not None and (
+                result.retcode in (10009, 10010)
+                or (result.retcode == 0 and (getattr(result, "deal", 0)
+                                             or getattr(result, "order", 0)))):
                 return True
             transient = result is None or result.retcode in TRANSIENT_RETCODES
             if not transient or attempt >= max_retries:
@@ -723,12 +838,20 @@ class MT5Engine:
             "sl": round(sl, info.digits),
             "tp": round(tp, info.digits),
         }
-        result = mt5.order_send(request)
-        return result is not None and result.retcode == mt5.TRADE_RETCODE_DONE
+        result = mt5.order_send(**request)
+        return result is not None and result.retcode in (0, mt5.TRADE_RETCODE_DONE)  # see OrderResult.ok
 
     def get_closed_deal(self, ticket: int, offset_fallback: int = 0) -> Optional[dict]:
         """Look up the exit deal for a position that's no longer open, so the
         caller can reconcile it into the ledger (exit price, P&L, reason)."""
+        # position=0 is not "no filter" -- it matches whatever unrelated deal
+        # the terminal happens to return, whose price and timestamps then get
+        # written into the ledger as this trade's exit (see the phantom
+        # $100,000 record of 2026-08-21). A real position never has ticket 0.
+        if not ticket:
+            log.warning("get_closed_deal called with ticket=0 -- refusing to look up a "
+                        "position that cannot exist.")
+            return None
         deals = mt5.history_deals_get(position=ticket)
         if not deals:
             return None

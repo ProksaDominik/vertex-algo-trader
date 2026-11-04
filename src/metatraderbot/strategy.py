@@ -35,6 +35,26 @@ from metatraderbot.instruments import contract_mult
 USD_PER_LOT_PER_DOLLAR_MOVE = 100.0
 
 
+def bar_times(bars: pd.DataFrame) -> pd.DatetimeIndex:
+    """Bar timestamps from a "timestamp" COLUMN (metatraderbot.backtest keeps
+    them there) or the INDEX (live bars from mt5_engine / nt_engine).
+
+    Strategies that read only bars["timestamp"] silently returned nothing on
+    live bars -- ORB, VWAP and time-of-day reversion never produced a single
+    live signal (found 2026-09-29) -- so anything time-based goes through here.
+    """
+    if "timestamp" in bars.columns:
+        return pd.DatetimeIndex(bars["timestamp"])
+    return pd.DatetimeIndex(bars.index)
+
+
+def bar_time(bars: pd.DataFrame, i: int) -> pd.Timestamp:
+    """Timestamp of bar ``i`` (positional), wherever the bars keep it."""
+    if "timestamp" in bars.columns:
+        return pd.Timestamp(bars["timestamp"].iloc[i])
+    return pd.Timestamp(bars.index[i])
+
+
 class Direction(str, Enum):
     LONG = "long"
     SHORT = "short"

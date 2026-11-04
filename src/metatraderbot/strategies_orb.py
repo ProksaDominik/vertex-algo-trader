@@ -22,7 +22,7 @@ from __future__ import annotations
 import pandas as pd
 
 from metatraderbot.instruments import contract_mult
-from metatraderbot.strategy import Direction, TradeSpec
+from metatraderbot.strategy import Direction, TradeSpec, bar_time
 
 
 class ORBStrategy:
@@ -50,7 +50,7 @@ class ORBStrategy:
 
     def on_bar(self, bar_index: int, bars: pd.DataFrame) -> list[TradeSpec]:
         current = bars.iloc[bar_index]
-        ts = pd.Timestamp(current["timestamp"])
+        ts = bar_time(bars, bar_index)
         day = ts.date()
         if day != self._tracked_day:
             self._reset_for_new_day(day)

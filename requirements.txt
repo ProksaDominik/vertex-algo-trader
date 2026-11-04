@@ -1,12 +1,24 @@
-MetaTrader5
-tzdata; sys_platform == 'win32'>=5.0.45
-pandas>=2.1
-numpy>=1.26
-pyyaml>=6.0.1
-python-dotenv>=1.0.1
-pytest>=8.0
-dukascopy-python>=4.0
-pyarrow>=15.0
-streamlit>=1.30
-plotly>=5.20
-scikit-learn>=1.4
+# Pinned to the versions this app is verified against (2026-08-22).
+#
+# Pinned rather than floated on purpose: this project has already lost days to a
+# dependency behaving differently than expected -- MetaTrader5 5.0.5735 rejects
+# order_send(request) positionally and requires order_send(**request), which is
+# the opposite of what its own docstring says. A float-version install on a new
+# PC could silently pick a build with different calling conventions or retcode
+# semantics and every order would fail with a misleading error.
+#
+# Upgrading any of these means re-testing order placement end to end.
+
+MetaTrader5==5.0.5735
+pandas==3.0.3
+numpy==2.5.1
+pyarrow==24.0.0
+PyYAML==6.0.3
+python-dotenv==1.2.2
+streamlit==1.59.1
+plotly==6.9.0
+scikit-learn==1.9.0
+tzdata==2026.2; sys_platform == 'win32'
+dukascopy-python==4.0.1
+pytest==8.4.2
+anthropic>=2,<3     # the trading desk's agents (scripts/run_trading_desk.py)

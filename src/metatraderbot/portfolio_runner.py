@@ -91,6 +91,15 @@ STRATEGY_CLASSES: dict[str, Type] = {
 WARMUP_BARS = 300
 
 
+class _MarketClosedRetry(Exception):
+    """Raised by _execute_trade when the symbol isn't tradeable right now
+    (broker rollover window). Caught by _process_slot so it holds the bar
+    instead of advancing slot.last_bar_ts past it — otherwise the bar is
+    marked seen regardless of outcome and the signal is lost forever the
+    moment the market reopens (confirmed live: YOLO's only 3 signals since
+    2026-08-05 all died this way, retcode 10018 "Market closed")."""
+
+
 def expand_configs(configs: list) -> list:
     """Expand each per-strategy entry into one LEG per symbol.
 
@@ -1055,16 +1064,26 @@ class PortfolioRunner:
         # miss a breakout that already reversed by the time polling resumes,
         # since only the latest bar's relationship to price gets checked.
         new_bar_indices = bars.index[bars["timestamp"] > slot.last_bar_ts].tolist()
-        slot.last_bar_ts = latest_ts
         latest_index = len(bars) - 1
+        # last_bar_ts advances PER BAR, only once that bar is actually
+        # resolved (signal recorded, or a legitimate one-shot skip) — NOT
+        # unconditionally up front. Advancing it eagerly (the old behavior)
+        # marked every bar "seen" the instant it was first looked at, so a
+        # market-closed retry (see _MarketClosedRetry below) never actually
+        # got a second poll: the very next tick's `latest_ts <= slot.last_bar_ts`
+        # check above would already be true and skip straight past this loop.
+        # Confirmed live: this is why YOLO's 3 signals since 2026-08-05 all
+        # died on the first "Market closed" attempt and were never retried.
 
         for bar_index in new_bar_indices:
             # Idempotency key = the bar's TIMESTAMP. The old key (bar_index)
             # was the bar's position in the rolling window — always 299 for
             # the newest bar — which permanently killed a slot after its
             # first signal (AUDIT C1, confirmed in the live ledgers).
-            bar_ts = bars.loc[bar_index, "timestamp"].isoformat()
+            bar_ts_val = bars.loc[bar_index, "timestamp"]
+            bar_ts = bar_ts_val.isoformat()
             if self.ledger.already_have_signal(slot.name, bar_ts):
+                slot.last_bar_ts = bar_ts_val
                 continue
 
             # on_bar always runs for unseen bars (keeps stateful strategies
@@ -1073,11 +1092,14 @@ class PortfolioRunner:
                 trades = slot.strategy.on_bar(bar_index, bars)
             except Exception as e:
                 log.exception(f"[{slot.name}] strategy.on_bar error: {e}")
+                slot.last_bar_ts = bar_ts_val
                 continue
             if not trades:
+                slot.last_bar_ts = bar_ts_val
                 continue
 
             if not self._trading_enabled():
+                slot.last_bar_ts = bar_ts_val
                 continue  # scanning paused — strategy state stays current, but no new orders
 
             # Replay-staleness gate (AUDIT H6): after downtime, old bars are
@@ -1089,14 +1111,25 @@ class PortfolioRunner:
                     f"[{slot.name}] {len(trades)} signal(s) from {bar_ts} skipped — "
                     f"{age} bars stale (max_signal_age_bars={self.max_signal_age_bars})"
                 )
+                slot.last_bar_ts = bar_ts_val
                 continue
 
             if len(self.engine.get_positions(slot.magic)) >= self.max_positions:
                 log.info(f"[{slot.name}] signal skipped — slot at max_positions ({self.max_positions})")
+                slot.last_bar_ts = bar_ts_val
                 continue
 
-            for trade in trades:
-                self._execute_trade(slot, trade, bar_index, bar_ts)
+            try:
+                for trade in trades:
+                    self._execute_trade(slot, trade, bar_index, bar_ts)
+            except _MarketClosedRetry:
+                # Do NOT advance last_bar_ts: leave this bar "new" so the
+                # next poll re-enters this loop and tries again. Also stop
+                # processing any newer bars this tick — the retry needs to
+                # resolve (or age out via max_signal_age_bars) in order.
+                break
+
+            slot.last_bar_ts = bar_ts_val
 
         return raw
 
@@ -1649,14 +1682,17 @@ class PortfolioRunner:
         #
         # Checking BEFORE log_signal means the signal is never recorded, so
         # the next tick re-evaluates the same bar and retries once the market
-        # opens -- within the max_signal_age_bars window.
+        # opens -- within the max_signal_age_bars window. This ONLY works if
+        # the caller (_process_slot) also holds off marking the bar seen —
+        # raise so it can tell "retry me" apart from every other gate above,
+        # which are legitimate one-shot skips.
         if not self.engine.is_tradeable(slot.symbol):
             log.info(f"[{slot.name}] market closed for {slot.symbol} — "
                      f"holding signal, will retry while the bar is fresh")
             self.ledger.log_rejection(config_name=slot.name, symbol=slot.symbol,
                                       gate="market_closed",
                                       reason="symbol not tradeable right now")
-            return
+            raise _MarketClosedRetry()
 
         signal_id = self.ledger.log_signal(
             config_name=slot.name,

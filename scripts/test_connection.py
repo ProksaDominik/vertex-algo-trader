@@ -15,6 +15,9 @@ Prints the exact gold symbol name for your broker — save that value for Phase 
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 try:
     import MetaTrader5 as mt5
@@ -22,6 +25,9 @@ except ImportError:
     print("[FAIL] MetaTrader5 package not installed.")
     print("       Fix: activate the venv and run `pip install -r requirements.txt`.")
     sys.exit(2)
+
+from metatraderbot.mt5_lock import install_mt5_lock  # noqa: E402
+install_mt5_lock(mt5)  # serialize IPC calls with any bot/dashboard process already running
 
 
 GOLD_CANDIDATES = [

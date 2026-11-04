@@ -1,127 +1,102 @@
-# Vertex Algo Bot
+# Vertex — a trading bot for prop-firm futures accounts
 
-Multi-strategy algorithmic paper-trading system for MetaTrader 5, running two
-parallel portfolios against one broker account:
+Vertex trades Nasdaq-100 futures (NQ) automatically on prop-firm accounts
+(LucidPro 50K). A prop firm lends you a trading account if you pass its test;
+if you lose too much, the account is closed and you only lose the fee.
 
-- **FTMO** — conservative, framed against a $10,000 prop-firm-style account,
-  with kill switches tuned under FTMO's daily/total drawdown limits.
-- **YOLO** — aggressive, framed against a $200 personal account, no kill
-  switch by design.
+The project has three parts: the **research** that picked the strategy, the
+**bot** that trades it through NinjaTrader 8, and a **dashboard** to watch it.
 
-Both portfolios run several strategies at once across a basket of FX pairs,
-gold, and indices, each as an independent signal stream (its own MT5 magic
-number), monitored live through a custom web dashboard.
+Not financial advice — a personal project.
 
-## Status
+## Results in one minute
 
-Live paper trading (no real money) on an MT5 demo account. Not investment
-advice — this is a personal project for exploring systematic strategies.
+- **Backtest of the plan:** a typical year makes about **+$117,000** (real NQ
+  data), and every 12-month stretch tested was profitable.
+- **But the most important test:** when the bot picks buy or sell **at random**
+  (a coin flip, so no skill at all), the plan still makes money in **88–96%** of
+  years. So most of the profit does **not** come from predicting the market. It
+  comes from how prop-firm accounts pay: a failed account only costs its fee
+  ($115), while a working account pays out up to $2,500 at a time.
+- **One account on its own:** passes the firm's test **41%** of the time, makes
+  about **$20,900** in an average year, and loses at most **$3,325** in a bad one.
+- **Live so far:** **−$1,159** after about five weeks — within what the backtest
+  expects, but at the weak end.
 
-## Stack
+## The numbers
 
-- **Platform**: MetaTrader 5 desktop (Windows), driven via the `MetaTrader5`
-  Python package
-- **Language**: Python 3.11+
-- **Dashboard**: Streamlit, with live-updating candlestick charts built on
-  TradingView's open-source `lightweight-charts` library (via a small local
-  JSON API — Streamlit's own chart widgets can't update without a visible
-  redraw)
-- **Ledger**: SQLite, one file per portfolio
+### The plan, replayed over every 12 months of history (21 Oct 2026)
 
-## Strategies
+The plan: start with one account, add another for every $2,500 earned (up to
+five), and take at most $1,500 profit a day. Tested on real NQ futures
+(2021–25) and on the Nasdaq-100 index (2017–25, a longer history), also under
+three stress tests:
 
-| Strategy | Idea |
-|---|---|
-| **Donchian Breakout** | Trades in the direction of a break above/below the recent N-bar high/low channel — classic Turtle-style trend following. |
-| **MACD Trend** | Enters on a fast/slow EMA (MACD) crossover, filtered to agree with the zero line. |
-| **No-Wick Retrace** | Looks for a one-sided ("wickless") candle against a 50-EMA trend, then enters on a retrace to that level. |
+- **Worse fills:** every order gets a worse price ($10 per contract, about 3× the
+  normal assumption).
+- **Coin flip:** buy or sell is picked at random.
+- **Harshest:** both at once.
 
-Exit management on top of each strategy's own SL/TP:
+| 12 months | Years in profit | Worst year | Typical year | Best year |
+|---|---:|---:|---:|---:|
+| As tested, real NQ | 100% | +$38,135 | +$116,849 | +$210,906 |
+| As tested, index | 96% | −$4,676 | +$104,303 | +$201,014 |
+| Worse fills, real NQ | 100% | +$38,135 | +$113,017 | +$198,694 |
+| Worse fills, index | 96% | −$4,721 | +$96,452 | +$201,014 |
+| **Harshest, real NQ** | **96%** | **−$10,771** | **+$72,776** | +$229,578 |
+| **Harshest, index** | **88%** | **−$21,037** | **+$47,733** | +$280,649 |
 
-- **Ratchet trailing stop** — once a trade reaches a configurable profit
-  threshold (in R-multiples of its own risk), the stop is moved forward to
-  lock in a fraction of the gain, re-evaluated every tick.
-- **Skyrocket exit** — closes a trade early (at market) if the current
-  candle is an outsized, favorably-moving spike relative to recent average
-  range, instead of waiting for a fixed target.
-- **Start/stop control** — a dashboard button pauses new signal execution
-  per portfolio without touching already-open positions (still fully
-  managed — trailing stop, reconciliation, etc. keep running).
+How often each kind of year happened:
 
-## Repo layout
+| Year | As tested | Harshest |
+|---|---|---|
+| Above $200,000 | 1–2% | about 1% |
+| Above $150,000 | about 1 in 4–5 | about 1 in 12 |
+| Above $100,000 | about 1 in 2 | about 1 in 4 |
+| Lost money | 0–4% | 4–12% (up to 1 year in 8) |
 
-```
-metatraderbot/
-├── config/
-│   ├── portfolio_ftmo.yaml   ← FTMO portfolio: pairs, strategies, risk, exits
-│   └── portfolio_yolo.yaml   ← YOLO portfolio (same shape, more aggressive)
-├── scripts/
-│   ├── run_paper.py          ← main bot entrypoint (one process per portfolio)
-│   ├── dashboard.py          ← Streamlit dashboard
-│   ├── chart_api.py          ← local JSON API feeding the live JS charts
-│   ├── start_all.ps1         ← idempotent recovery script (MT5 + both bots + dashboard)
-│   └── assets/               ← dashboard logo/icon
-├── src/metatraderbot/
-│   ├── strategy.py            ← No-Wick strategy + shared types
-│   ├── strategies_donchian.py
-│   ├── strategies_macd.py
-│   ├── portfolio_runner.py    ← polling loop, position management, exits
-│   ├── mt5_engine.py          ← MT5 connection/order wrapper
-│   ├── ledger.py              ← SQLite trade/signal/heartbeat logging
-│   ├── backtest.py            ← bar-close backtest engine
-│   └── instruments.py         ← per-symbol contract specs
-├── data/                      ← price history + ledgers (gitignored)
-├── logs/                      ← runtime logs (gitignored)
-└── tests/
-```
+### One account (LucidPro 50K, 25 Oct 2026)
 
-## Setup
+| Price | Passes the test | Funded accounts that get paid | Paid per funded account | Reaches $2k in 2 months | Reaches $5k in 2 months | Years in profit | Worst year | Average year |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| $115 (reset $120) | 41% | 37% | $823 | 52% | 23% | 74% | −$3,325 | $20,900 |
 
-### 1. MT5 desktop
+### Live
 
-Install MetaTrader 5 and log into a **demo** account. Leave the terminal
-running and AlgoTrading enabled (green button in the toolbar) whenever the
-bots are running.
+−$1,159 after about five weeks of live trading. One account has about a 1 in 4
+chance of still being down after two months, so this is possible — but it is
+the weak end of the range.
 
-### 2. Python environment
+## How the strategy was chosen
 
-```powershell
-cd metatraderbot
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
+The rule was: write the idea down, code it, then try hard to break it (trading
+costs, different time periods, a second dataset, walk-forward tests).
+Full report: [`docs/FUTURES_RESEARCH_REPORT.md`](docs/FUTURES_RESEARCH_REPORT.md).
 
-### 3. Credentials
+- **The first forex strategies had no edge.** On a 10-symbol basket, five of six
+  lost money out-of-sample ([`backtest/strategy_comparison.md`](backtest/strategy_comparison.md)).
+- **On futures, 1,730 strategy tests:** only 16% were profitable after costs —
+  about what luck alone would give.
+- **Seven new ideas on 10.5 years of data:** one survived every test (an
+  opening-range breakout with a trend filter). It is real but small: it passes
+  the firm's test about 40% of the time, against 31% for random trading.
 
-```powershell
-copy .env.example .env
-# then fill in MT5_LOGIN / MT5_PASSWORD / MT5_SERVER
-```
+## How it works
 
-`.env` is gitignored — never commit real credentials.
+- **The bot** ([`scripts/run_lucid_futures_funded.py`](scripts/run_lucid_futures_funded.py)):
+  once a trading day, buys 1 NQ contract with a profit target set to what the
+  next payout still needs ($150–$1,500), and closes by 16:00 New York time.
+- **Safety:** it follows the prop firm's rules itself — the maximum loss, the
+  daily loss limit, flat before the session ends — and checks them every few
+  seconds.
+- **Execution:** a small NinjaTrader 8 add-on
+  ([`ninjatrader/VertexBridge.cs`](ninjatrader/VertexBridge.cs)) receives the
+  bot's orders on the same computer and places them.
+- **Dashboard:** Streamlit — live accounts, trade history and the simulator
+  behind the tables above.
+- **Tests:** `pytest` in [`tests/`](tests/).
 
-### 4. Run everything
+The 21 Oct stress-test variants (worse fills, coin flip) were run in a research
+session; that script is not in this repo yet.
 
-```powershell
-scripts\start_all.ps1
-```
-
-This is idempotent — safe to re-run any time; it only starts whatever isn't
-already running (MT5 terminal, FTMO bot, YOLO bot, chart API, dashboard).
-
-Then open the dashboard at **http://localhost:8501**.
-
-### Optional: auto-start on login
-
-A shortcut to `start_all.ps1` in the Windows Startup folder (or a desktop
-shortcut for on-demand runs) brings everything back after a reboot without
-any manual steps.
-
-## Risk disclosure
-
-This trades real MT5 order flow against a demo account, but the strategies
-and risk parameters here are tuned for an aggressive, experimental style
-(the YOLO portfolio explicitly so). Nothing in this repo is financial
-advice, and none of it should be pointed at a real-money account without
-independently understanding and accepting the risk.
+Setup: [`INSTALL.md`](INSTALL.md).

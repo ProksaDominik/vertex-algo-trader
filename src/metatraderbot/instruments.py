@@ -142,9 +142,32 @@ PAIR_SPECS: dict[str, dict[str, float]] = {
     "EURAUD": {"contract_mult": 69_000.0, "spread_price": 0.00018, "commission_per_lot": 3.50},
     # CAD-quoted, same conversion logic as USDCAD.
     "AUDCAD": {"contract_mult": 74_000.0, "spread_price": 0.00015, "commission_per_lot": 3.50},
-    "US30": {"contract_mult": 1.0, "spread_price": 2.0, "commission_per_lot": 3.50},
-    "DE40": {"contract_mult": 1.0, "spread_price": 1.0, "commission_per_lot": 3.50},
+    # US30/DE40 duplicate keys REMOVED 2026-08-15 (found by the background
+    # YOLO research agent): this market-expansion block re-defined both
+    # with less-accurate placeholder spreads (2.0 / 1.0), silently
+    # shadowing the "measured live" entries already defined above
+    # (1.20 / 0.50) -- Python dict literals let the later key win with no
+    # warning. The shadowed placeholders were MORE conservative (higher
+    # spread), so this didn't overstate any edge, but it did understate
+    # US30/DE40 edges in every backtest that used them. The measured-live
+    # values above are now the only entries for these two symbols.
 }
+
+# --- CME futures (Lucid Trading), added 2026-09-29 --------------------------
+# Keyed by futures root ("6B", "MGC", ...) so every strategy and the backtester
+# run on futures bars unchanged. contract_mult is the exact point value; the
+# spread is one tick (the normal touch on these contracts, so an estimate);
+# commission is Lucid's published per-side rate -- Backtest._costs doubles it
+# for the round turn, the same convention as the 3.50/side CFD entries above.
+# The roots cannot collide with the CFD keys above (none is a futures root).
+from metatraderbot.futures import FUTURES_SPECS as _FUTURES_SPECS  # noqa: E402
+
+for _root, _fs in _FUTURES_SPECS.items():
+    PAIR_SPECS[_root] = {
+        "contract_mult": _fs["point_value"],
+        "spread_price": _fs["tick_size"],
+        "commission_per_lot": _fs["commission"],
+    }
 
 
 def get_specs(config_or_symbol) -> dict[str, float]:
@@ -173,6 +196,9 @@ def pip_size(symbol: str) -> float:
     rather than raw price distance. JPY pairs and gold quote at a coarser
     resolution than the other majors; indices use whole points."""
     s = symbol.upper()
+    fut = _FUTURES_SPECS.get(s.split(" ")[0])
+    if fut is not None:
+        return fut["pip"]
     if s.endswith("JPY"):
         return 0.01
     if s == "XAUUSD":

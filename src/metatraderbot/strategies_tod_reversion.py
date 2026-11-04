@@ -22,7 +22,7 @@ import pandas as pd
 
 from metatraderbot.indicators import atr
 from metatraderbot.instruments import contract_mult
-from metatraderbot.strategy import Direction, TradeSpec
+from metatraderbot.strategy import Direction, TradeSpec, bar_time
 
 
 class TODReversionStrategy:
@@ -47,7 +47,7 @@ class TODReversionStrategy:
         recent = bars.iloc[: bar_index + 1]
         current = recent.iloc[-1]
         try:
-            ts = pd.Timestamp(current["timestamp"])
+            ts = bar_time(recent, len(recent) - 1)
         except (KeyError, ValueError):
             return []
 

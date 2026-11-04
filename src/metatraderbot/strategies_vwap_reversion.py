@@ -23,7 +23,7 @@ import pandas as pd
 
 from metatraderbot.indicators import atr
 from metatraderbot.instruments import contract_mult
-from metatraderbot.strategy import Direction, TradeSpec
+from metatraderbot.strategy import Direction, TradeSpec, bar_times
 
 
 class VWAPReversionStrategy:
@@ -51,15 +51,11 @@ class VWAPReversionStrategy:
             return []
         recent = bars.iloc[: bar_index + 1]
         current = recent.iloc[-1]
-        try:
-            ts = pd.Timestamp(current["timestamp"])
-        except (KeyError, ValueError):
-            return []
-
         # Bars belonging to the CURRENT UTC day (anchor point for VWAP).
         try:
-            day = ts.date()
-            same_day = recent[pd.to_datetime(recent["timestamp"]).dt.date == day]
+            times = bar_times(recent)
+            day = times[-1].date()
+            same_day = recent[times.date == day]
         except (KeyError, ValueError, TypeError):
             return []
         if len(same_day) < 3:

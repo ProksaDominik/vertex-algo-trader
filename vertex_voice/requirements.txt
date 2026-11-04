@@ -1,0 +1,17 @@
+anthropic
+numpy
+sounddevice
+vosk
+faster-whisper
+edge-tts>=7.3.1
+miniaudio
+pyttsx3
+pystray
+pillow
+# the PC butler (pc_control.py): volume, YouTube music, what plays in Spotify / the browser
+pycaw
+yt-dlp
+winrt-runtime
+winrt-Windows.Media.Control
+winrt-Windows.Foundation
+winrt-Windows.Foundation.Collections

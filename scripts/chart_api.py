@@ -65,14 +65,30 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # keep the console quiet — this gets hit every ~1s per open chart
 
+    def handle_one_request(self):
+        # The dashboard polls this ~1x/sec per open chart and drops the socket
+        # the moment a chart is closed, the page is refreshed, or a Streamlit
+        # fragment re-runs. Mid-response that surfaces as ConnectionAborted/
+        # Reset/BrokenPipe, which BaseHTTPRequestHandler prints as a full
+        # traceback -- thousands of lines of stderr describing a browser tab
+        # closing normally. Nothing is wrong and nothing is recoverable, so
+        # swallow exactly these and let the connection die quietly.
+        try:
+            super().handle_one_request()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            self.close_connection = True
+
     def _send_json(self, payload: dict, status: int = 200) -> None:
         body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            self.close_connection = True  # client vanished mid-write; see handle_one_request
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)

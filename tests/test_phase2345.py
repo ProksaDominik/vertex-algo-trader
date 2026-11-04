@@ -675,9 +675,15 @@ def test_closed_market_holds_the_signal_instead_of_burning_it(tmp_path):
                       stop_loss=1.0980, take_profit=1.1060, lots=0.1,
                       signal_bar_index=300)
 
-    # market shut -> no order, and crucially no signal recorded
+    # market shut -> no order, and crucially no signal recorded. Raises
+    # _MarketClosedRetry so the caller (_process_slot) knows to hold the
+    # bar instead of marking it seen -- see test below for the loop-level
+    # regression this guards (last_bar_ts advancing regardless of outcome).
+    from metatraderbot.portfolio_runner import _MarketClosedRetry
+
     fake.tradeable = False
-    r._execute_trade(slot, trade, bar_index=300, bar_ts="bar-1")
+    with pytest.raises(_MarketClosedRetry):
+        r._execute_trade(slot, trade, bar_index=300, bar_ts="bar-1")
     assert len(fake.positions) == 0, "must not trade into a closed market"
     assert not led.already_have_signal(slot.name, "bar-1"), (
         "signal must NOT be consumed — otherwise the bar can never be retried")
@@ -687,6 +693,49 @@ def test_closed_market_holds_the_signal_instead_of_burning_it(tmp_path):
     r._execute_trade(slot, trade, bar_index=300, bar_ts="bar-1")
     assert len(fake.positions) == 1, "must trade once the market reopens"
     assert led.already_have_signal(slot.name, "bar-1")
+
+
+def test_process_slot_retries_closed_market_across_polls(tmp_path):
+    """Loop-level regression for the same bug as the test above, but
+    exercised through _process_slot (the actual poll loop) instead of
+    calling _execute_trade directly.
+
+    _execute_trade alone correctly avoids logging the signal when the
+    market is shut, but _process_slot used to advance slot.last_bar_ts to
+    the new bar's timestamp UNCONDITIONALLY, the moment the bar was first
+    seen -- regardless of whether _execute_trade actually resolved it. That
+    made `latest_ts <= slot.last_bar_ts` true on the very next poll, so the
+    method returned before ever reaching the retry logic again: the "hold
+    and retry" from the test above was never actually exercised live. This
+    is the gap that let YOLO's signals die silently for a week even after
+    the _execute_trade-level fix landed.
+    """
+    fake = FakeEngine()
+    led = Ledger(tmp_path / "led.sqlite")
+    r = _mk_runner(tmp_path, fake, led, cfg=base_cfg())
+    r.initialize()
+    slot = r.slots[0]
+    slot.last_bar_ts = pd.Timestamp.min.tz_localize("UTC")  # force processing
+    breakout_bar_ts = fake.bars.index[-2]  # last CLOSED bar, per make_bars()
+
+    # market shut on the poll where the breakout bar first appears
+    fake.tradeable = False
+    r._process_slot(slot)
+    assert len(fake.positions) == 0, "must not trade into a closed market"
+    assert slot.last_bar_ts < breakout_bar_ts, (
+        "last_bar_ts must NOT advance past an unresolved bar — otherwise "
+        "the next poll's `latest_ts <= last_bar_ts` check skips retrying it")
+
+    # still shut a poll later -> still held, not silently dropped
+    r._process_slot(slot)
+    assert len(fake.positions) == 0
+    assert slot.last_bar_ts < breakout_bar_ts
+
+    # market reopens -> the SAME bar is retried on the next poll and fills
+    fake.tradeable = True
+    r._process_slot(slot)
+    assert len(fake.positions) == 1, "must trade once the market reopens"
+    assert slot.last_bar_ts == breakout_bar_ts
 
 
 def test_max_hold_days_closes_stale_positions(tmp_path):

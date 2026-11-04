@@ -1,0 +1,5 @@
+2026-12-23
+The last day of the side-by-side paper test of the new strategy (A-D breadth: a second trial bot and funded account
+Sim102-AD next to the current ones). Owner 2026-10-21: "add the new strategy along all of this and we keep it for
+testing for 2 months". Vertex.ps1 starts its bots while today is on or before this date (paper mode only) and stops
+them after it, between 22:05 and 23:55 Prague when no race is open. Change the date to stretch or end the test.

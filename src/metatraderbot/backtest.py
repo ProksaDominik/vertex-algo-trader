@@ -85,6 +85,19 @@ class Backtest:
         self.trail_lock_fraction = float(cap.get("trail_lock_fraction", 0.5))
         self.skyrocket_multiple = float(cap.get("skyrocket_multiple", 0.0))
 
+        # Optional TIME STOP: force a position out at market once it has been
+        # held this long, whatever the price. Default 0 = off, so every
+        # existing result stays reproducible.
+        #
+        # Exists to test "keep the strong daily entries but cap how long
+        # capital is committed" -- this roster's daily legs hold 22 days median
+        # and up to 265, which is what makes a $2,000 realised payout take
+        # months. Capping the hold is not free: a trade cut at 2 days exits
+        # wherever price happens to be, so winners that needed a week to reach
+        # target become partial gains or small losses. Whether that trade is
+        # worth making is an empirical question, not an obvious one.
+        self.max_hold_hours = float(cap.get("max_hold_hours", 0.0))
+
         self.strategy = strategy if strategy is not None else NoWickStrategy(config)
         self.equity = self.initial_capital
         self.equity_curve: list[tuple[pd.Timestamp, float]] = []
@@ -119,10 +132,20 @@ class Backtest:
                 if bar["low"] <= pos.take_profit:
                     hit_tp = True
 
+            # SL/TP take precedence over the time stop: if this bar's range
+            # reached either level, that exit happened first intrabar.
+            timed_out = (
+                self.max_hold_hours > 0
+                and (bar_ts - pos.entered_at).total_seconds() / 3600.0 >= self.max_hold_hours
+            )
+
             if hit_sl:
                 exit_price, reason = pos.stop_loss, "sl"
             elif hit_tp:
                 exit_price, reason = pos.take_profit, "tp"
+            elif timed_out:
+                # Out at market on this bar's close, wherever price is.
+                exit_price, reason = float(bar["close"]), "time"
             else:
                 # Skyrocket exit at bar close (mirrors runner logic).
                 closed_now = False

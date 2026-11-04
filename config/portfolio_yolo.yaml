@@ -97,7 +97,15 @@ capital:
   max_concurrent_positions_total: 10
   max_currency_exposure_r: 0.0
   max_signal_age_bars: 2
-  min_lot_policy: floor
+  # floor -> skip (2026-08-14): floor was silently accepting broker-minimum
+  # lot sizes far above the $30 target on this $200 book -- US30/NAS100 ~10x
+  # over ($295-305 vs $30, already bigger than max_total_drawdown_usd), and
+  # JP225 ~28,763x over ($862,900 vs $30 -- 1.0 lot is the broker minimum,
+  # and it has been holding a live signal for over a week waiting for the
+  # market to open). skip keeps risk honest (same choice portfolio_ftmo.yaml
+  # already made) at the cost of Donchian_Trend firing rarely on index
+  # symbols until the account grows past their minimum-lot economics.
+  min_lot_policy: skip
   skip_weekdays:
   - 6
   max_trades_per_day: 8
