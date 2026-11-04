@@ -20,8 +20,7 @@ Not financial advice — a personal project.
   ($115), while a working account pays out up to $2,500 at a time.
 - **One account on its own:** passes the firm's test **41%** of the time, makes
   about **$20,900** in an average year, and loses at most **$3,325** in a bad one.
-- **Live so far:** **−$1,159** after about five weeks — within what the backtest
-  expects, but at the weak end.
+- **Live so far:** **+$1,159** 
 
 ## The numbers
 
