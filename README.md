@@ -1,4 +1,4 @@
-# Vertex — a trading bot for prop-firm futures accounts
+# Vertex: a trading bot for prop-firm futures accounts
 
 Vertex trades Nasdaq-100 futures (NQ) automatically on prop-firm accounts
 (LucidPro 50K). A prop firm lends you a trading account if you pass its test;
@@ -7,7 +7,7 @@ if you lose too much, the account is closed and you only lose the fee.
 The project has three parts: the **research** that picked the strategy, the
 **bot** that trades it through NinjaTrader 8, and a **dashboard** to watch it.
 
-Not financial advice — a personal project.
+Not financial advice; this is a personal project.
 
 ## Results in one minute
 
@@ -20,7 +20,7 @@ Not financial advice — a personal project.
   ($115), while a working account pays out up to $2,500 at a time.
 - **One account on its own:** passes the firm's test **41%** of the time, makes
   about **$20,900** in an average year, and loses at most **$3,325** in a bad one.
-- **Live so far:** **+$1,159** 
+- **Live so far:** **+$1,159**
 
 ## The numbers
 
@@ -60,8 +60,6 @@ How often each kind of year happened:
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | $115 (reset $120) | 41% | 37% | $823 | 52% | 23% | 74% | −$3,325 | $20,900 |
 
-
-
 ## How the strategy was chosen
 
 The rule was: write the idea down, code it, then try hard to break it (trading
@@ -70,7 +68,7 @@ Full report: [`docs/FUTURES_RESEARCH_REPORT.md`](docs/FUTURES_RESEARCH_REPORT.md
 
 - **The first forex strategies had no edge.** On a 10-symbol basket, five of six
   lost money out-of-sample ([`backtest/strategy_comparison.md`](backtest/strategy_comparison.md)).
-- **On futures, 1,730 strategy tests:** only 16% were profitable after costs —
+- **On futures, 1,730 strategy tests:** only 16% were profitable after costs,
   about what luck alone would give.
 - **Seven new ideas on 10.5 years of data:** one survived every test (an
   opening-range breakout with a trend filter). It is real but small: it passes
@@ -81,13 +79,13 @@ Full report: [`docs/FUTURES_RESEARCH_REPORT.md`](docs/FUTURES_RESEARCH_REPORT.md
 - **The bot** ([`scripts/run_lucid_futures_funded.py`](scripts/run_lucid_futures_funded.py)):
   once a trading day, buys 1 NQ contract with a profit target set to what the
   next payout still needs ($150–$1,500), and closes by 16:00 New York time.
-- **Safety:** it follows the prop firm's rules itself — the maximum loss, the
-  daily loss limit, flat before the session ends — and checks them every few
+- **Safety:** it follows the prop firm's rules itself (the maximum loss, the
+  daily loss limit, flat before the session ends) and checks them every few
   seconds.
 - **Execution:** a small NinjaTrader 8 add-on
   ([`ninjatrader/VertexBridge.cs`](ninjatrader/VertexBridge.cs)) receives the
   bot's orders on the same computer and places them.
-- **Dashboard:** Streamlit — live accounts, trade history and the simulator
+- **Dashboard:** Streamlit: live accounts, trade history and the simulator
   behind the tables above.
 - **Tests:** `pytest` in [`tests/`](tests/).
 
